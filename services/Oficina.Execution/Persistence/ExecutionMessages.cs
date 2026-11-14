@@ -29,5 +29,23 @@ public sealed class ExecutionOutboxMessage
     public string Body { get; private set; } = string.Empty;
     public DateTime OccurredAtUtc { get; private set; }
     public DateTime? PublishedAtUtc { get; private set; }
-    public void MarkPublished(DateTime atUtc) => PublishedAtUtc = atUtc;
+    public DateTime? NextAttemptAtUtc { get; private set; }
+    public int PublishAttempts { get; private set; }
+    public string? LastError { get; private set; }
+
+    public void MarkPublished(DateTime atUtc)
+    {
+        PublishedAtUtc = atUtc;
+        NextAttemptAtUtc = null;
+        LastError = null;
+        PublishAttempts++;
+    }
+
+    public void MarkFailed(string error, DateTime failedAtUtc)
+    {
+        PublishAttempts++;
+        LastError = error.Length <= 500 ? error : error[..500];
+        NextAttemptAtUtc = failedAtUtc.AddSeconds(
+            Math.Min(300, 1 << Math.Min(PublishAttempts, 9)));
+    }
 }

@@ -25,6 +25,7 @@ public sealed class ExecutionDbContext(DbContextOptions<ExecutionDbContext> opti
             entity.HasKey(item => item.EventId);
             entity.Property(item => item.EventType).IsRequired().HasMaxLength(80);
             entity.Property(item => item.Body).IsRequired();
+            entity.Property(item => item.LastError).HasMaxLength(500);
             entity.HasIndex(item => new { item.PublishedAtUtc, item.OccurredAtUtc });
         });
 

@@ -56,8 +56,18 @@ namespace Oficina.Execution.Persistence.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("OccurredAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PublishAttempts")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("PublishedAtUtc")
                         .HasColumnType("timestamp with time zone");

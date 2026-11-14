@@ -75,8 +75,22 @@ public sealed class ExecutionOutboxWorker(IAmazonSQS sqs, IServiceScopeFactory s
             {
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ExecutionDbContext>();
-                var pending = await db.OutboxMessages.Where(item => item.PublishedAtUtc == null)
-                    .OrderBy(item => item.OccurredAtUtc).Take(10).ToListAsync(stoppingToken);
+                var now = DateTime.UtcNow;
+                var postgres = db.Database.IsNpgsql();
+                await using var transaction = postgres
+                    ? await db.Database.BeginTransactionAsync(stoppingToken)
+                    : null;
+                var pending = postgres
+                    ? await db.OutboxMessages.FromSqlInterpolated($"""
+                        SELECT * FROM outbox_messages
+                        WHERE "PublishedAtUtc" IS NULL
+                          AND ("NextAttemptAtUtc" IS NULL OR "NextAttemptAtUtc" <= {now})
+                        ORDER BY "OccurredAtUtc"
+                        LIMIT 10 FOR UPDATE SKIP LOCKED
+                        """).ToListAsync(stoppingToken)
+                    : await db.OutboxMessages.Where(item => item.PublishedAtUtc == null &&
+                            (item.NextAttemptAtUtc == null || item.NextAttemptAtUtc <= now))
+                        .OrderBy(item => item.OccurredAtUtc).Take(10).ToListAsync(stoppingToken);
                 foreach (var item in pending)
                 {
                     try
@@ -95,9 +109,12 @@ public sealed class ExecutionOutboxWorker(IAmazonSQS sqs, IServiceScopeFactory s
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
                     catch (Exception error)
                     {
+                        item.MarkFailed(error.Message, DateTime.UtcNow);
+                        await db.SaveChangesAsync(stoppingToken);
                         logger.LogWarning(error, "Falha ao publicar resultado {EventId} da reserva", item.EventId);
                     }
                 }
+                if (transaction is not null) await transaction.CommitAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception error)
