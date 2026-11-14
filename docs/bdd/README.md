@@ -9,6 +9,8 @@ Os cenários em [saga-fase4.feature](saga-fase4.feature) descrevem comportamento
 | Recusa após pagamento → revisão administrativa | `ExecutionRejectionTests.RejectionMovesPaidOrderToManualReviewWithoutFinalizing` | Coberto |
 | Pedido → estorno confirmado → OS cancelada | `RefundFlowTests.RefundRequestCrossesQueuesAndConfirmationCancelsOrder`; `RefundOrderProcessorTests.RefundIsConfirmedOnlyByGetAndDoesNotRepeatAmbiguousPost` | Coberto com provedor simulado |
 | POST ambíguo → sem repetição → reconciliação | `RefundOrderProcessorTests.RefundIsConfirmedOnlyByGetAndDoesNotRepeatAmbiguousPost`; `RefundReconciliationHttpTests.InternalRouteRequiresTokenAndConfirmsRefundWithGetOnly` | Coberto com provedor simulado |
+| Falha de envio da Outbox → retry | `OpenedEventFlowTests.OpenedOrderMovesThroughApprovalPaymentAndExecution` (falha uma vez, verifica pendência/tentativas, reenvia) | Coberto localmente |
+| Reentrega de `PaymentConfirmed` → sem novo consumo | `OpenedEventFlowTests.OpenedOrderMovesThroughApprovalPaymentAndExecution` (reenvia mesmo `eventId` por fila isolada, Inbox rejeita) | Coberto localmente |
 
 Execute os testes com ElasticMQ e DynamoDB Local:
 
@@ -20,4 +22,4 @@ $env:BILLING_DYNAMO_ENDPOINT='http://localhost:8000'
 .\.dotnet_home\sdk10\dotnet.exe test tests/OficinaMvp.Integration.Tests --no-restore
 ```
 
-Antes de marcar BDD como completo, validar duplicatas e falhas pelas filas em todos os caminhos e gerar evidência de execução no CI. O arquivo `.feature` ainda precisa de um runner Gherkin se a avaliação exigir execução direta da especificação. Testes com Mercado Pago real dependem de credenciais de testes.
+Antes de marcar BDD como completo, ampliar duplicatas e falhas para os demais caminhos e gerar evidência de execução no CI. O arquivo `.feature` ainda precisa de um runner Gherkin se a avaliação exigir execução direta da especificação. Testes com Mercado Pago real dependem de credenciais de testes.

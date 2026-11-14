@@ -40,3 +40,15 @@ Funcionalidade: Saga da ordem de serviço distribuída
     Quando a resposta do POST é inconclusiva
     Então uma nova passagem do worker consulta a order sem repetir o POST
     E uma reconciliação por GET confirma o estorno quando o provedor o registra
+
+  Cenário: Falha transitória no envio preserva a mensagem
+    Dado que a abertura da OS está gravada com uma mensagem na Outbox
+    Quando o primeiro envio para a fila falha
+    Então a mensagem permanece pendente com a tentativa registrada
+    E uma nova tentativa publica o mesmo evento sem recriar a OS
+
+  Cenário: Reentrega de pagamento confirmado não consome estoque duas vezes
+    Dado que PaymentConfirmed já foi aplicado na OS
+    Quando a mesma identidade de evento chega novamente por uma fila
+    Então a Inbox ignora a reentrega
+    E a OS mantém um único comando ConsumeStockRequested

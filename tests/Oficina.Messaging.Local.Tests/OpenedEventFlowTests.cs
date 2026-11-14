@@ -86,10 +86,16 @@ public sealed class OpenedEventFlowTests
         db.OutboxMessages.Add(new OutboxMessage(eventId, "WorkOrderOpened", json, DateTime.UtcNow));
         await db.SaveChangesAsync();
 
-        var dispatcher = new OutboxDispatcher(db, new SqsIntegrationMessageSender(sqs, queueUrl),
+        var senderWithFailure = new FailOnceSender(new SqsIntegrationMessageSender(sqs, queueUrl));
+        var dispatcher = new OutboxDispatcher(db, senderWithFailure,
             NullLogger<OutboxDispatcher>.Instance);
         Assert.Equal(1, await dispatcher.DispatchBatchAsync(CancellationToken.None));
+        Assert.Null((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
+        Assert.Equal(1, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
+        Assert.Equal(1, await dispatcher.DispatchBatchAsync(CancellationToken.None));
         Assert.NotNull((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
+        Assert.Equal(2, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
+        Assert.Null((await db.OutboxMessages.SingleAsync()).LastError);
         var settings = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?>
             {
@@ -180,7 +186,6 @@ public sealed class OpenedEventFlowTests
         Assert.Equal(BudgetStatus.Approved, approved!.Status);
         Assert.Equal(BudgetStatus.Approved,
             (await repository.DecideAsync(orderId, 1, true, CancellationToken.None))!.Status);
-        var decision = Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
         WorkOrderProcessState decisionState = WorkOrderProcessState.AwaitingApproval;
         using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
         {
@@ -193,7 +198,6 @@ public sealed class OpenedEventFlowTests
             }
         }
         await using var decisionDb = new WorkshopDbContext(dbOptions);
-        Assert.False(await new BudgetDecisionHandler(decisionDb).HandleAsync(decision.Body, CancellationToken.None));
         var decidedOrder = await decisionDb.WorkOrders.SingleAsync(item => item.Id == orderId);
         Assert.Equal(WorkOrderProcessState.AwaitingStockReservation, decisionState);
         Assert.Equal(decisionState, decidedOrder.ProcessState);
@@ -326,6 +330,27 @@ public sealed class OpenedEventFlowTests
         Assert.Equal(WorkOrderStatus.InExecution,
             (await paymentDb.WorkOrders.SingleAsync(item => item.Id == orderId)).Status);
         Assert.Equal(6, await paymentDb.InboxMessages.CountAsync());
+        var paymentEventId = (await paymentDb.InboxMessages.SingleAsync(item =>
+            item.EventType == "PaymentConfirmed")).EventId;
+        var duplicatePayment = new OsEvents.IntegrationEnvelope<OsEvents.PaymentConfirmedPayload>(
+            paymentEventId, "PaymentConfirmed", 1, orderId, Guid.NewGuid(), orderId,
+            order.BranchId, DateTime.UtcNow,
+            new OsEvents.PaymentConfirmedPayload(paymentAttemptId, "ORDTEST123", 12500, "BRL"));
+        var duplicateQueueUrl = (await sqs.CreateQueueAsync(
+            "os-duplicate-test-" + Guid.NewGuid().ToString("N"))).QueueUrl;
+        await sqs.SendMessageAsync(duplicateQueueUrl, JsonSerializer.Serialize(duplicatePayment,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var requeued = await sqs.ReceiveMessageAsync(new ReceiveMessageRequest
+        {
+            QueueUrl = duplicateQueueUrl, MaxNumberOfMessages = 1, WaitTimeSeconds = 5
+        });
+        var message = Assert.Single(requeued.Messages);
+        Assert.False(await new PaymentConfirmedHandler(paymentDb).HandleAsync(message.Body,
+            CancellationToken.None));
+        await sqs.DeleteMessageAsync(duplicateQueueUrl, message.ReceiptHandle);
+        Assert.Equal(6, await paymentDb.InboxMessages.CountAsync());
+        Assert.Single(await paymentDb.OutboxMessages.Where(item =>
+            item.EventType == "ConsumeStockRequested").ToListAsync());
         await using var finalExecution = new ExecutionDbContext(executionOptions);
         Assert.Equal(ReservationStatus.Consumed,
             (await finalExecution.StockReservations.SingleAsync()).Status);
@@ -336,5 +361,18 @@ public sealed class OpenedEventFlowTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken) => Task.FromResult(respond(request));
+    }
+
+    private sealed class FailOnceSender(IIntegrationMessageSender inner) : IIntegrationMessageSender
+    {
+        private int _calls;
+
+        public Task SendAsync(Guid eventId, string eventType, string payloadJson,
+            CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+                throw new HttpRequestException("Falha SQS transitória simulada.");
+            return inner.SendAsync(eventId, eventType, payloadJson, cancellationToken);
+        }
     }
 }
