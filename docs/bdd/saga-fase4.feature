@@ -52,3 +52,15 @@ Funcionalidade: Saga da ordem de serviço distribuída
     Quando a mesma identidade de evento chega novamente por uma fila
     Então a Inbox ignora a reentrega
     E a OS mantém um único comando ConsumeStockRequested
+
+  Esquema do Cenário: Mensagem inválida vai para a fila de erro
+    Dado que a fila de <servico> tem uma DLQ configurada
+    Quando um evento desconhecido é recebido repetidamente
+    Então o consumidor não confirma a mensagem inválida
+    E a mensagem chega à DLQ após o limite de tentativas
+
+    Exemplos:
+      | servico  |
+      | OS       |
+      | Billing  |
+      | Execução |

@@ -11,6 +11,7 @@ Os cenários em [saga-fase4.feature](saga-fase4.feature) descrevem comportamento
 | POST ambíguo → sem repetição → reconciliação | `RefundOrderProcessorTests.RefundIsConfirmedOnlyByGetAndDoesNotRepeatAmbiguousPost`; `RefundReconciliationHttpTests.InternalRouteRequiresTokenAndConfirmsRefundWithGetOnly` | Coberto com provedor simulado |
 | Falha de envio da Outbox → retry | `OpenedEventFlowTests.OpenedOrderMovesThroughApprovalPaymentAndExecution` (falha uma vez, verifica pendência/tentativas, reenvia) | Coberto localmente |
 | Reentrega de `PaymentConfirmed` → sem novo consumo | `OpenedEventFlowTests.OpenedOrderMovesThroughApprovalPaymentAndExecution` (reenvia mesmo `eventId` por fila isolada, Inbox rejeita) | Coberto localmente |
+| Mensagem inválida → DLQ | `DeadLetterFlowTests.InvalidMessageMovesToDeadLetterQueue` (OS, Billing e Execução) | Coberto em ElasticMQ; AWS pendente |
 
 Execute os testes com ElasticMQ e DynamoDB Local:
 
