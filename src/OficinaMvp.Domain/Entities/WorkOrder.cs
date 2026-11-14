@@ -56,6 +56,7 @@ public sealed class WorkOrder
     public Guid? BudgetId { get; private set; }
     public int? BudgetVersion { get; private set; }
     public Guid? ReservationId { get; private set; }
+    public Guid? PaymentAttemptId { get; private set; }
     public string Notes { get; private set; } = string.Empty;
     public string? BranchId { get; private set; }
     public decimal ServicesTotal { get; private set; }
@@ -134,9 +135,12 @@ public sealed class WorkOrder
         RecordProcessNote(changedAtUtc, "Orçamento aprovado. Aguardando reserva de peças.");
     }
 
-    public void ConfirmStockReservation(DateTime changedAtUtc)
+    public void ConfirmStockReservation(DateTime changedAtUtc, Guid? paymentAttemptId = null)
     {
         EnsureProcessState(WorkOrderProcessState.AwaitingStockReservation);
+        if (paymentAttemptId == Guid.Empty)
+            throw new DomainException("Identificador da tentativa de pagamento inválido.");
+        PaymentAttemptId = paymentAttemptId;
         ProcessState = WorkOrderProcessState.AwaitingPayment;
         RecordProcessNote(changedAtUtc, "Peças reservadas. Aguardando pagamento.");
     }

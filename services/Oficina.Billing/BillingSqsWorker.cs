@@ -1,5 +1,6 @@
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using System.Text.Json;
 
 namespace Oficina.Billing;
 
@@ -28,8 +29,16 @@ public sealed class BillingSqsWorker(
                     try
                     {
                         using var scope = scopes.CreateScope();
-                        await scope.ServiceProvider.GetRequiredService<WorkOrderOpenedHandler>()
-                            .HandleAsync(message.Body, stoppingToken);
+                        using var envelope = JsonDocument.Parse(message.Body);
+                        var eventType = envelope.RootElement.GetProperty("eventType").GetString();
+                        if (eventType == "WorkOrderOpened")
+                            await scope.ServiceProvider.GetRequiredService<WorkOrderOpenedHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType == "CreatePaymentRequested")
+                            await scope.ServiceProvider.GetRequiredService<PaymentRequestHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
+                        else
+                            throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

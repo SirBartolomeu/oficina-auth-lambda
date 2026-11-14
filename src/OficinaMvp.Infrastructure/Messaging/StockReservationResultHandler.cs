@@ -29,7 +29,18 @@ public sealed class StockReservationResultHandler(WorkshopDbContext dbContext)
             order.BudgetVersion != envelope.Payload.OrderVersion)
             throw new DomainException("Resultado da reserva não corresponde à OS.");
         if (envelope.EventType == "StockReserved")
-            order.ConfirmStockReservation(envelope.OccurredAtUtc);
+        {
+            var paymentAttemptId = Guid.NewGuid();
+            order.ConfirmStockReservation(envelope.OccurredAtUtc, paymentAttemptId);
+            var payment = new IntegrationEnvelope<CreatePaymentRequestedPayload>(
+                Guid.NewGuid(), "CreatePaymentRequested", 1, envelope.CorrelationId,
+                envelope.EventId, order.Id, order.BranchId, DateTime.UtcNow,
+                new CreatePaymentRequestedPayload(paymentAttemptId, order.BudgetId!.Value,
+                    order.BudgetVersion!.Value, checked((long)(order.BudgetTotal * 100m)), "BRL"));
+            dbContext.OutboxMessages.Add(new OutboxMessage(payment.EventId, payment.EventType,
+                JsonSerializer.Serialize(payment, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                payment.OccurredAtUtc));
+        }
         else
         {
             var reason = envelope.Payload.Reason ?? "Estoque indisponível.";

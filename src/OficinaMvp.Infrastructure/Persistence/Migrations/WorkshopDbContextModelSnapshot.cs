@@ -195,6 +195,9 @@ namespace OficinaMvp.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<Guid?>("PaymentAttemptId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("ProcessState")
                         .IsRequired()
                         .HasMaxLength(40)

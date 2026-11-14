@@ -25,6 +25,7 @@ builder.Services.AddSingleton<IAmazonDynamoDB>(_ => string.IsNullOrWhiteSpace(se
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<IBudgetEventStore>(provider => provider.GetRequiredService<BillingRepository>());
 builder.Services.AddScoped<WorkOrderOpenedHandler>();
+builder.Services.AddScoped<PaymentRequestHandler>();
 var workOrdersQueueUrl = builder.Configuration["Messaging:WorkOrdersQueueUrl"];
 var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];
 if (!string.IsNullOrWhiteSpace(workOrdersQueueUrl) || !string.IsNullOrWhiteSpace(osEventsQueueUrl))

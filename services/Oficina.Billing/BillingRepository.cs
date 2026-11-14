@@ -136,6 +136,70 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         return response.Item is { Count: > 0 } ? FromItem(response.Item) : null;
     }
 
+    public async Task<bool> RecordPaymentRequestAsync(Guid eventId, PaymentRequest payment,
+        CancellationToken cancellationToken)
+    {
+        var paymentKey = PaymentKey(payment.Id);
+        paymentKey["workOrderId"] = new AttributeValue { S = payment.WorkOrderId.ToString("D") };
+        paymentKey["budgetId"] = new AttributeValue { S = payment.BudgetId.ToString("D") };
+        paymentKey["budgetVersion"] = new AttributeValue { N = payment.BudgetVersion.ToString() };
+        paymentKey["branchId"] = new AttributeValue { S = payment.BranchId ?? string.Empty };
+        paymentKey["totalCents"] = new AttributeValue { N = payment.TotalCents.ToString() };
+        paymentKey["status"] = new AttributeValue { S = "Requested" };
+        paymentKey["requestedAtUtc"] = new AttributeValue { S = payment.RequestedAtUtc.ToString("O") };
+        var inbox = InboxKey(eventId);
+        inbox["receivedAtUtc"] = new AttributeValue { S = DateTime.UtcNow.ToString("O") };
+        try
+        {
+            await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
+            {
+                TransactItems =
+                [
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = paymentKey,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = inbox,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } }
+                ]
+            }, cancellationToken);
+            return true;
+        }
+        catch (TransactionCanceledException)
+        {
+            var received = await dynamo.GetItemAsync(new GetItemRequest
+            {
+                TableName = _table, Key = InboxKey(eventId), ConsistentRead = true
+            }, cancellationToken);
+            if (received.Item is not { Count: > 0 })
+                throw new InvalidOperationException("Tentativa de pagamento já usada por outro evento.");
+            var existing = await GetPaymentRequestAsync(payment.Id, cancellationToken);
+            if (existing != payment)
+                throw new InvalidOperationException("Evento de pagamento repetido com conteúdo diferente.");
+            return false;
+        }
+    }
+
+    public async Task<PaymentRequest?> GetPaymentRequestAsync(Guid paymentAttemptId,
+        CancellationToken cancellationToken)
+    {
+        var response = await dynamo.GetItemAsync(new GetItemRequest
+        {
+            TableName = _table, Key = PaymentKey(paymentAttemptId), ConsistentRead = true
+        }, cancellationToken);
+        if (response.Item is not { Count: > 0 }) return null;
+        var item = response.Item;
+        return new PaymentRequest(paymentAttemptId, Guid.Parse(item["workOrderId"].S),
+            Guid.Parse(item["budgetId"].S), int.Parse(item["budgetVersion"].N),
+            string.IsNullOrEmpty(item["branchId"].S) ? null : item["branchId"].S,
+            long.Parse(item["totalCents"].N), DateTime.Parse(item["requestedAtUtc"].S,
+                null, System.Globalization.DateTimeStyles.RoundtripKind));
+    }
+
     public async Task<Budget?> DecideAsync(Guid workOrderId, int version, bool approved, CancellationToken cancellationToken)
     {
         var existing = await GetAsync(workOrderId, version, cancellationToken);
@@ -204,6 +268,12 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
     {
         ["pk"] = new() { S = $"EVENT#{eventId:N}" },
         ["sk"] = new() { S = "RECEIVED" }
+    };
+
+    private static Dictionary<string, AttributeValue> PaymentKey(Guid paymentAttemptId) => new()
+    {
+        ["pk"] = new() { S = $"PAYMENT#{paymentAttemptId:N}" },
+        ["sk"] = new() { S = "REQUEST" }
     };
 
     private static Dictionary<string, AttributeValue> OutboxKey(Guid eventId) => new()

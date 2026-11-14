@@ -96,6 +96,17 @@ public sealed class RemoteExecutionQuoteTests
         Assert.False(await resultHandler.HandleAsync(reservedBody, CancellationToken.None));
         Assert.Equal(WorkOrderProcessState.AwaitingPayment,
             (await resultDb.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId)).ProcessState);
+        var paymentCommand = Assert.Single(await resultDb.OutboxMessages.AsNoTracking()
+            .Where(item => item.EventType == "CreatePaymentRequested").ToListAsync());
+        using (var paymentJson = JsonDocument.Parse(paymentCommand.PayloadJson))
+        {
+            Assert.Equal(19000, paymentJson.RootElement.GetProperty("payload")
+                .GetProperty("totalCents").GetInt64());
+            Assert.Equal((await resultDb.WorkOrders.AsNoTracking()
+                    .SingleAsync(item => item.Id == orderId)).PaymentAttemptId,
+                paymentJson.RootElement.GetProperty("payload")
+                    .GetProperty("paymentAttemptId").GetGuid());
+        }
         var updated = await client.GetFromJsonAsync<JsonElement>($"/api/work-orders/{orderId}");
         Assert.Equal("AwaitingApproval", updated.GetProperty("status").GetString());
 

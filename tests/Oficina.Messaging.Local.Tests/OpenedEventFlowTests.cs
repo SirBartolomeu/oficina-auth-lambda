@@ -84,6 +84,7 @@ public sealed class OpenedEventFlowTests
             .AddScoped<BillingRepository>()
             .AddScoped<IBudgetEventStore>(provider => provider.GetRequiredService<BillingRepository>())
             .AddScoped<WorkOrderOpenedHandler>()
+            .AddScoped<PaymentRequestHandler>()
             .BuildServiceProvider();
         using var worker = new BillingSqsWorker(sqs, services.GetRequiredService<IServiceScopeFactory>(),
             settings, NullLogger<BillingSqsWorker>.Instance);
@@ -97,7 +98,6 @@ public sealed class OpenedEventFlowTests
                 if (budget is null) await Task.Delay(100, timeout.Token);
             }
         }
-        await worker.StopAsync(CancellationToken.None);
         Assert.NotNull(budget);
         var duplicate = await new WorkOrderOpenedHandler(repository).HandleAsync(json, CancellationToken.None);
         var ready = Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
@@ -160,9 +160,44 @@ public sealed class OpenedEventFlowTests
         Assert.Equal(WorkOrderProcessState.AwaitingStockReservation, decisionState);
         Assert.Equal(decisionState, decidedOrder.ProcessState);
         Assert.Equal(2, await decisionDb.InboxMessages.CountAsync());
-        Assert.Single(await decisionDb.OutboxMessages
+        var reserveCommand = Assert.Single(await decisionDb.OutboxMessages
             .Where(item => item.EventType == "ReserveStockRequested").ToListAsync());
+        reserveCommand.MarkPublished(DateTime.UtcNow);
+        await decisionDb.SaveChangesAsync();
         Assert.Empty(await repository.GetPendingOutboxAsync(CancellationToken.None));
+
+        var reservedOrder = await decisionDb.WorkOrders.AsNoTracking()
+            .SingleAsync(item => item.Id == orderId);
+        var reserved = new OsEvents.IntegrationEnvelope<OsEvents.StockReservationResultPayload>(
+            Guid.NewGuid(), "StockReserved", 1, orderId, decision.EventId,
+            orderId, "sp-centro", DateTime.UtcNow,
+            new OsEvents.StockReservationResultPayload(reservedOrder.ReservationId!.Value, 1, null));
+        await using (var reservationDb = new WorkshopDbContext(dbOptions))
+            Assert.True(await new StockReservationResultHandler(reservationDb).HandleAsync(
+                JsonSerializer.Serialize(reserved, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                CancellationToken.None));
+        var paymentAttemptId = (await decisionDb.WorkOrders.AsNoTracking()
+            .SingleAsync(item => item.Id == orderId)).PaymentAttemptId!.Value;
+        await using (var dispatchDb = new WorkshopDbContext(dbOptions))
+        {
+            var sender = new SqsIntegrationMessageSender(sqs,
+                new Dictionary<string, string> { ["CreatePaymentRequested"] = queueUrl });
+            Assert.Equal(1, await new OutboxDispatcher(dispatchDb, sender,
+                NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
+        }
+        PaymentRequest? payment = null;
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            while (payment is null && !timeout.IsCancellationRequested)
+            {
+                payment = await repository.GetPaymentRequestAsync(paymentAttemptId, CancellationToken.None);
+                if (payment is null) await Task.Delay(100);
+            }
+        }
+        await worker.StopAsync(CancellationToken.None);
+        Assert.NotNull(payment);
+        Assert.Equal(12500, payment.TotalCents);
+        Assert.Equal(budget.Id, payment.BudgetId);
     }
 
 }

@@ -50,5 +50,37 @@ public sealed class BudgetDecisionTransactionTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             repository.DecideAsync(budget.WorkOrderId, 1, !approved, CancellationToken.None));
         Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
+
+        var paymentAttemptId = Guid.NewGuid();
+        var paymentEvent = new CreatePaymentRequestedEnvelope(Guid.NewGuid(),
+            "CreatePaymentRequested", 1, budget.WorkOrderId, pending.EventId,
+            budget.WorkOrderId, budget.BranchId, DateTime.UtcNow,
+            new CreatePaymentRequestedPayload(paymentAttemptId, budget.Id, budget.Version,
+                budget.TotalCents, "BRL"));
+        var paymentBody = JsonSerializer.Serialize(paymentEvent,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var paymentHandler = new PaymentRequestHandler(repository);
+        if (approved)
+        {
+            Assert.True(await paymentHandler.HandleAsync(paymentBody, CancellationToken.None));
+            Assert.False(await paymentHandler.HandleAsync(paymentBody, CancellationToken.None));
+            var saved = await repository.GetPaymentRequestAsync(paymentAttemptId, CancellationToken.None);
+            Assert.Equal(budget.TotalCents, saved!.TotalCents);
+            Assert.Equal(budget.Id, saved.BudgetId);
+            var tampered = paymentEvent with
+            {
+                EventId = Guid.NewGuid(),
+                Payload = paymentEvent.Payload with { TotalCents = 1 }
+            };
+            await Assert.ThrowsAsync<InvalidOperationException>(() => paymentHandler.HandleAsync(
+                JsonSerializer.Serialize(tampered, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                CancellationToken.None));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                paymentHandler.HandleAsync(paymentBody, CancellationToken.None));
+            Assert.Null(await repository.GetPaymentRequestAsync(paymentAttemptId, CancellationToken.None));
+        }
     }
 }

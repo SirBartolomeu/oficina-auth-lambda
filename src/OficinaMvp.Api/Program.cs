@@ -67,6 +67,7 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
     {
         var routes = new Dictionary<string, string>();
         if (!string.IsNullOrWhiteSpace(billingQueueUrl)) routes["WorkOrderOpened"] = billingQueueUrl;
+        if (!string.IsNullOrWhiteSpace(billingQueueUrl)) routes["CreatePaymentRequested"] = billingQueueUrl;
         if (!string.IsNullOrWhiteSpace(executionCommandsQueueUrl))
             routes["ReserveStockRequested"] = executionCommandsQueueUrl;
         builder.Services.AddSingleton<IIntegrationMessageSender>(serviceProvider =>
