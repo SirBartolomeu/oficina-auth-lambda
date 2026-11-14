@@ -149,6 +149,22 @@ public sealed class WorkOrderTests
         Assert.Throws<DomainException>(() => order.ConfirmStockReservation(DateTime.UtcNow));
     }
 
+    [Fact]
+    public void RejectedPayment_ShouldWaitForStockReleaseBeforeCanceling()
+    {
+        var order = BuildDefaultWorkOrder();
+        order.SendBudget(DateTime.UtcNow);
+        order.ApproveBudgetForPayment(DateTime.UtcNow, Guid.NewGuid());
+        order.ConfirmStockReservation(DateTime.UtcNow, Guid.NewGuid());
+
+        order.BeginStockRelease(DateTime.UtcNow, "expired");
+        Assert.Equal(WorkOrderProcessState.ReleasingStock, order.ProcessState);
+        Assert.Throws<DomainException>(() => order.ConfirmPayment(DateTime.UtcNow));
+
+        order.ConfirmStockRelease(DateTime.UtcNow);
+        Assert.Equal(WorkOrderProcessState.Canceled, order.ProcessState);
+    }
+
     private static WorkOrder BuildDefaultWorkOrder(DateTime? now = null)
     {
         var createdAt = now ?? DateTime.UtcNow;

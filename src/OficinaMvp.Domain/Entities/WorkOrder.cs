@@ -158,6 +158,20 @@ public sealed class WorkOrder
         RecordProcessNote(changedAtUtc, "Pagamento confirmado. Aguardando execução.");
     }
 
+    public void BeginStockRelease(DateTime changedAtUtc, string reason)
+    {
+        EnsureProcessState(WorkOrderProcessState.AwaitingPayment);
+        ProcessState = WorkOrderProcessState.ReleasingStock;
+        RecordProcessNote(changedAtUtc, $"Pagamento não concluído. Liberando peças: {NormalizeOptional(reason)}");
+    }
+
+    public void ConfirmStockRelease(DateTime changedAtUtc)
+    {
+        EnsureProcessState(WorkOrderProcessState.ReleasingStock);
+        ProcessState = WorkOrderProcessState.Canceled;
+        RecordProcessNote(changedAtUtc, "Peças liberadas. Tentativa cancelada.");
+    }
+
     public void StartExecutionAfterPayment(DateTime changedAtUtc)
     {
         EnsureProcessState(WorkOrderProcessState.ReadyForExecution);

@@ -20,7 +20,11 @@ public sealed class PaymentReconciliationService(BillingRepository repository,
         if (order.Status == "processed" && order.PaymentStatus == "processed" &&
             order.PaidCents == payment.TotalCents)
             return await repository.ConfirmPaymentAsync(payment, order.Id, cancellationToken);
-        if (order.Status is "canceled" or "expired" or "refunded" ||
+        if ((order.Status is "canceled" or "expired") &&
+            (order.PaymentStatus is "canceled" or "expired") && order.PaidCents == 0)
+            return await repository.RejectPaymentAsync(payment, order.Id, order.Status,
+                cancellationToken);
+        if (order.Status == "refunded" ||
             order.Status == "processed")
         {
             await repository.MarkCreatedPaymentManualReviewAsync(paymentAttemptId, cancellationToken);

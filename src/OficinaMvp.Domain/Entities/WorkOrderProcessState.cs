@@ -10,5 +10,6 @@ public enum WorkOrderProcessState
     InExecution = 6,
     Completed = 7,
     Canceled = 8,
-    ManualReview = 9
+    ManualReview = 9,
+    ReleasingStock = 10
 }

@@ -26,8 +26,16 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                     try
                     {
                         using var scope = scopes.CreateScope();
-                        await scope.ServiceProvider.GetRequiredService<ReserveStockRequestedHandler>()
-                            .HandleAsync(message.Body, stoppingToken);
+                        using var envelope = JsonDocument.Parse(message.Body);
+                        var eventType = envelope.RootElement.GetProperty("eventType").GetString();
+                        if (eventType == "ReserveStockRequested")
+                            await scope.ServiceProvider.GetRequiredService<ReserveStockRequestedHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType == "ReleaseStockRequested")
+                            await scope.ServiceProvider.GetRequiredService<ReleaseStockRequestedHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
+                        else
+                            throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }

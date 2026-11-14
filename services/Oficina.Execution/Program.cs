@@ -27,6 +27,7 @@ builder.Services.AddDbContext<ExecutionDbContext>(options =>
 });
 builder.Services.AddScoped<ExecutionService>();
 builder.Services.AddScoped<ReserveStockRequestedHandler>();
+builder.Services.AddScoped<ReleaseStockRequestedHandler>();
 var commandsQueueUrl = builder.Configuration["Messaging:CommandsQueueUrl"];
 var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];
 if (!string.IsNullOrWhiteSpace(commandsQueueUrl) || !string.IsNullOrWhiteSpace(osEventsQueueUrl))

@@ -69,7 +69,8 @@ public sealed class ExecutionService(ExecutionDbContext db)
         return new ReservationResponse(request.ReservationId, request.WorkOrderId, ReservationStatus.Reserved.ToString());
     }
 
-    public async Task<ReservationResponse?> ReleaseAsync(Guid reservationId, CancellationToken cancellationToken)
+    public async Task<ReservationResponse?> ReleaseAsync(Guid reservationId,
+        CancellationToken cancellationToken, bool saveChanges = true)
     {
         var reservation = await db.StockReservations.Include(item => item.Lines)
             .SingleOrDefaultAsync(item => item.Id == reservationId, cancellationToken);
@@ -88,7 +89,7 @@ public sealed class ExecutionService(ExecutionDbContext db)
             parts[line.PartId].ReturnToStock(line.Quantity);
 
         reservation.Release();
-        await db.SaveChangesAsync(cancellationToken);
+        if (saveChanges) await db.SaveChangesAsync(cancellationToken);
         return new ReservationResponse(reservation.Id, reservation.WorkOrderId, reservation.Status.ToString());
     }
 

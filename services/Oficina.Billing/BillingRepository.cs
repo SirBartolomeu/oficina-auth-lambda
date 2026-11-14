@@ -356,6 +356,59 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         }
     }
 
+    public async Task<bool> RejectPaymentAsync(PaymentRequest payment, string providerOrderId,
+        string reason, CancellationToken cancellationToken)
+    {
+        if (reason is not "expired" and not "canceled")
+            throw new ArgumentException("Motivo de recusa inválido.");
+        var eventId = Guid.NewGuid();
+        var occurredAt = DateTime.UtcNow;
+        var rejection = new PaymentRejectedEnvelope(eventId, "PaymentRejected", 1,
+            payment.WorkOrderId, Guid.NewGuid(), payment.WorkOrderId, payment.BranchId,
+            occurredAt, new PaymentRejectedPayload(payment.Id, providerOrderId,
+                payment.TotalCents, "BRL", reason));
+        var outbox = OutboxKey(eventId);
+        outbox["body"] = new AttributeValue { S = JsonSerializer.Serialize(rejection,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outbox["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
+        try
+        {
+            await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
+            {
+                TransactItems =
+                [
+                    new TransactWriteItem { Update = new Update
+                    {
+                        TableName = _table, Key = PaymentKey(payment.Id),
+                        ConditionExpression = "#status = :created AND providerOrderId = :providerOrderId",
+                        UpdateExpression = "SET #status = :rejected, rejectionReason = :reason",
+                        ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                        ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                        {
+                            [":created"] = new() { S = "Created" },
+                            [":rejected"] = new() { S = "Rejected" },
+                            [":providerOrderId"] = new() { S = providerOrderId },
+                            [":reason"] = new() { S = reason }
+                        }
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = outbox,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } }
+                ]
+            }, cancellationToken);
+            return true;
+        }
+        catch (TransactionCanceledException)
+        {
+            var current = await GetPaymentAttemptAsync(payment.Id, cancellationToken);
+            if (current?.Status == "Rejected" && current.ProviderOrderId == providerOrderId)
+                return false;
+            throw new InvalidOperationException("Conflito ao recusar pagamento.");
+        }
+    }
+
     public async Task MarkCreatedPaymentManualReviewAsync(Guid paymentAttemptId,
         CancellationToken cancellationToken)
     {
