@@ -4,7 +4,7 @@ Os cenários em [saga-fase4.feature](saga-fase4.feature) descrevem comportamento
 
 | Cenário | Testes executáveis existentes | Situação |
 |---|---|---|
-| Orçamento aprovado → reserva → pedido de pagamento | `OpenedEventFlowTests.OutboxRoundTripCreatesBudgetAndMovesOrderToApproval`; `StockReservationFlowTests.ReservationResultUpdatesOrderWithoutOverselling` | Coberto em segmentos; cenário único completo pendente |
+| Abertura → aprovação → reserva → pagamento → execução | `OpenedEventFlowTests.OpenedOrderMovesThroughApprovalPaymentAndExecution` (OS/Billing/Execução por ElasticMQ; consulta de pagamento simulada) | Coberto em um cenário local |
 | Pagamento `expired`/`canceled` → liberação | `StockReservationFlowTests.ReservationResultUpdatesOrderWithoutOverselling` (Billing consulta order simulada, publica via ElasticMQ; OS/Execução liberam estoque e concluem) | Coberto de Billing até Execução/OS |
 | Recusa após pagamento → revisão administrativa | `ExecutionRejectionTests.RejectionMovesPaidOrderToManualReviewWithoutFinalizing` | Coberto |
 | Pedido → estorno confirmado → OS cancelada | `RefundFlowTests.RefundRequestCrossesQueuesAndConfirmationCancelsOrder`; `RefundOrderProcessorTests.RefundIsConfirmedOnlyByGetAndDoesNotRepeatAmbiguousPost` | Coberto com provedor simulado |
@@ -20,4 +20,4 @@ $env:BILLING_DYNAMO_ENDPOINT='http://localhost:8000'
 .\.dotnet_home\sdk10\dotnet.exe test tests/OficinaMvp.Integration.Tests --no-restore
 ```
 
-Antes de marcar BDD como completo, unir abertura/aprovação/reserva/pagamento/execução em um cenário único, validar duplicatas e falhas pelas filas e gerar evidência de execução no CI. Testes com Mercado Pago real dependem de credenciais de testes.
+Antes de marcar BDD como completo, validar duplicatas e falhas pelas filas em todos os caminhos e gerar evidência de execução no CI. O arquivo `.feature` ainda precisa de um runner Gherkin se a avaliação exigir execução direta da especificação. Testes com Mercado Pago real dependem de credenciais de testes.

@@ -1,3 +1,7 @@
+extern alias execution;
+
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
@@ -9,6 +13,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using ExecutionCommandsWorker = execution::Oficina.Execution.ExecutionCommandsWorker;
+using ExecutionOutboxWorker = execution::Oficina.Execution.ExecutionOutboxWorker;
+using ExecutionService = execution::Oficina.Execution.ExecutionService;
+using ReserveStockRequestedHandler = execution::Oficina.Execution.ReserveStockRequestedHandler;
+using ConsumeStockRequestedHandler = execution::Oficina.Execution.ConsumeStockRequestedHandler;
+using ExecutionRequestedHandler = execution::Oficina.Execution.ExecutionRequestedHandler;
+using ExecutionDbContext = execution::Oficina.Execution.Persistence.ExecutionDbContext;
+using ReservationStatus = execution::Oficina.Execution.Persistence.ReservationStatus;
 using Oficina.Billing;
 using OficinaMvp.Api.Messaging;
 using OficinaMvp.Domain.Entities;
@@ -22,7 +34,7 @@ namespace Oficina.Messaging.Local.Tests;
 public sealed class OpenedEventFlowTests
 {
     [Fact]
-    public async Task OutboxRoundTripCreatesBudgetAndMovesOrderToApproval()
+    public async Task OpenedOrderMovesThroughApprovalPaymentAndExecution()
     {
         var sqsEndpoint = Environment.GetEnvironmentVariable("MESSAGING_SQS_ENDPOINT")
             ?? throw new InvalidOperationException("Defina MESSAGING_SQS_ENDPOINT para o teste local.");
@@ -34,6 +46,7 @@ public sealed class OpenedEventFlowTests
             new AmazonDynamoDBConfig { ServiceURL = dynamoEndpoint });
         var queueUrl = (await sqs.CreateQueueAsync("billing-test-" + Guid.NewGuid().ToString("N"))).QueueUrl;
         var osQueueUrl = (await sqs.CreateQueueAsync("os-events-test-" + Guid.NewGuid().ToString("N"))).QueueUrl;
+        var executionQueueUrl = (await sqs.CreateQueueAsync("execution-flow-" + Guid.NewGuid().ToString("N"))).QueueUrl;
         var table = "billing_flow_test_" + Guid.NewGuid().ToString("N");
         await dynamo.CreateTableAsync(new CreateTableRequest
         {
@@ -62,6 +75,13 @@ public sealed class OpenedEventFlowTests
         var dbOptions = new DbContextOptionsBuilder<WorkshopDbContext>().UseSqlite(sqlite).Options;
         await using var db = new WorkshopDbContext(dbOptions);
         await db.Database.EnsureCreatedAsync();
+        var executionConnectionString = $"Data Source=execution-flow-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var executionAnchor = new SqliteConnection(executionConnectionString);
+        await executionAnchor.OpenAsync();
+        var executionOptions = new DbContextOptionsBuilder<ExecutionDbContext>()
+            .UseSqlite(executionConnectionString).Options;
+        await using (var executionSetup = new ExecutionDbContext(executionOptions))
+            await executionSetup.Database.EnsureCreatedAsync();
         db.AddRange(customer, vehicle, order);
         db.OutboxMessages.Add(new OutboxMessage(eventId, "WorkOrderOpened", json, DateTime.UtcNow));
         await db.SaveChangesAsync();
@@ -75,7 +95,8 @@ public sealed class OpenedEventFlowTests
             {
                 ["DynamoDb:Table"] = table,
                 ["Messaging:WorkOrdersQueueUrl"] = queueUrl,
-                ["Messaging:OsEventsQueueUrl"] = osQueueUrl
+                ["Messaging:OsEventsQueueUrl"] = osQueueUrl,
+                ["Messaging:CommandsQueueUrl"] = executionQueueUrl
             }).Build();
         var repository = new BillingRepository(dynamo, settings);
         using var services = new ServiceCollection()
@@ -106,7 +127,17 @@ public sealed class OpenedEventFlowTests
             .AddScoped(_ => new WorkshopDbContext(dbOptions))
             .AddScoped<BudgetReadyHandler>()
             .AddScoped<BudgetDecisionHandler>()
+            .AddScoped<StockReservationResultHandler>()
             .AddScoped<PaymentConfirmedHandler>()
+            .AddScoped<StockConsumedHandler>()
+            .AddScoped<ExecutionStartedHandler>()
+            .BuildServiceProvider();
+        using var executionServices = new ServiceCollection()
+            .AddScoped(_ => new ExecutionDbContext(executionOptions))
+            .AddScoped<ExecutionService>()
+            .AddScoped<ReserveStockRequestedHandler>()
+            .AddScoped<ConsumeStockRequestedHandler>()
+            .AddScoped<ExecutionRequestedHandler>()
             .BuildServiceProvider();
         using var billingOutbox = new BillingOutboxWorker(sqs,
             services.GetRequiredService<IServiceScopeFactory>(), settings,
@@ -114,8 +145,16 @@ public sealed class OpenedEventFlowTests
         using var osWorker = new OsEventsSqsWorker(sqs,
             osServices.GetRequiredService<IServiceScopeFactory>(), settings,
             NullLogger<OsEventsSqsWorker>.Instance);
+        using var executionWorker = new ExecutionCommandsWorker(sqs,
+            executionServices.GetRequiredService<IServiceScopeFactory>(), settings,
+            NullLogger<ExecutionCommandsWorker>.Instance);
+        using var executionOutbox = new ExecutionOutboxWorker(sqs,
+            executionServices.GetRequiredService<IServiceScopeFactory>(), settings,
+            NullLogger<ExecutionOutboxWorker>.Instance);
         await billingOutbox.StartAsync(CancellationToken.None);
         await osWorker.StartAsync(CancellationToken.None);
+        await executionWorker.StartAsync(CancellationToken.None);
+        await executionOutbox.StartAsync(CancellationToken.None);
         WorkOrderStatus status = WorkOrderStatus.Received;
         using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
         {
@@ -161,20 +200,28 @@ public sealed class OpenedEventFlowTests
         Assert.Equal(2, await decisionDb.InboxMessages.CountAsync());
         var reserveCommand = Assert.Single(await decisionDb.OutboxMessages
             .Where(item => item.EventType == "ReserveStockRequested").ToListAsync());
-        reserveCommand.MarkPublished(DateTime.UtcNow);
-        await decisionDb.SaveChangesAsync();
+        Assert.Null(reserveCommand.PublishedAtUtc);
+        await using (var dispatchDb = new WorkshopDbContext(dbOptions))
+        {
+            var sender = new SqsIntegrationMessageSender(sqs,
+                new Dictionary<string, string> { ["ReserveStockRequested"] = executionQueueUrl });
+            Assert.Equal(1, await new OutboxDispatcher(dispatchDb, sender,
+                NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
+        }
         Assert.Empty(await repository.GetPendingOutboxAsync(CancellationToken.None));
-
-        var reservedOrder = await decisionDb.WorkOrders.AsNoTracking()
-            .SingleAsync(item => item.Id == orderId);
-        var reserved = new OsEvents.IntegrationEnvelope<OsEvents.StockReservationResultPayload>(
-            Guid.NewGuid(), "StockReserved", 1, orderId, decision.EventId,
-            orderId, "sp-centro", DateTime.UtcNow,
-            new OsEvents.StockReservationResultPayload(reservedOrder.ReservationId!.Value, 1, null));
-        await using (var reservationDb = new WorkshopDbContext(dbOptions))
-            Assert.True(await new StockReservationResultHandler(reservationDb).HandleAsync(
-                JsonSerializer.Serialize(reserved, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-                CancellationToken.None));
+        WorkOrderProcessState reservationState = WorkOrderProcessState.AwaitingStockReservation;
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            while (reservationState == WorkOrderProcessState.AwaitingStockReservation &&
+                   !timeout.IsCancellationRequested)
+            {
+                await using var verify = new WorkshopDbContext(dbOptions);
+                reservationState = (await verify.WorkOrders.SingleAsync(item => item.Id == orderId)).ProcessState;
+                if (reservationState == WorkOrderProcessState.AwaitingStockReservation)
+                    await Task.Delay(100);
+            }
+        }
+        Assert.Equal(WorkOrderProcessState.AwaitingPayment, reservationState);
         var paymentAttemptId = (await decisionDb.WorkOrders.AsNoTracking()
             .SingleAsync(item => item.Id == orderId)).PaymentAttemptId!.Value;
         await using (var dispatchDb = new WorkshopDbContext(dbOptions))
@@ -199,8 +246,27 @@ public sealed class OpenedEventFlowTests
         Assert.Equal(budget.Id, payment.BudgetId);
         Assert.True(await repository.CompletePaymentCreationAsync(paymentAttemptId,
             new MercadoPagoQrOrder("ORDTEST123", "qr-test", "created"), CancellationToken.None));
-        Assert.True(await repository.ConfirmPaymentAsync(payment, "ORDTEST123", CancellationToken.None));
-        Assert.False(await repository.ConfirmPaymentAsync(payment, "ORDTEST123", CancellationToken.None));
+        using var providerHttp = new HttpClient(new StubHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    id = "ORDTEST123", external_reference = $"pay_{payment.Id:N}",
+                    status = "processed", currency = "BRL", total_amount = "125.00",
+                    transactions = new { payments = new[]
+                    {
+                        new { status = "processed", paid_amount = "125.00" }
+                    } }
+                }), Encoding.UTF8, "application/json")
+            };
+        })) { BaseAddress = new Uri("https://api.mercadopago.com/") };
+        var reconciler = new PaymentReconciliationService(repository,
+            new MercadoPagoQrClient(providerHttp,
+                new MercadoPagoQrOptions("test-token", "test-pos")));
+        Assert.True(await reconciler.ReconcileAsync("ORDTEST123", CancellationToken.None));
+        Assert.False(await reconciler.ReconcileAsync("ORDTEST123", CancellationToken.None));
         WorkOrderProcessState paymentState = WorkOrderProcessState.AwaitingPayment;
         using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
         {
@@ -213,10 +279,62 @@ public sealed class OpenedEventFlowTests
             }
         }
         await billingOutbox.StopAsync(CancellationToken.None);
-        await osWorker.StopAsync(CancellationToken.None);
         Assert.Equal(WorkOrderProcessState.ReadyForExecution, paymentState);
+        await using (var consumeDb = new WorkshopDbContext(dbOptions))
+        {
+            var sender = new SqsIntegrationMessageSender(sqs,
+                new Dictionary<string, string> { ["ConsumeStockRequested"] = executionQueueUrl });
+            Assert.Equal(1, await new OutboxDispatcher(consumeDb, sender,
+                NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
+        }
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            var queued = false;
+            while (!queued && !timeout.IsCancellationRequested)
+            {
+                await using var verify = new WorkshopDbContext(dbOptions);
+                queued = await verify.OutboxMessages.AnyAsync(item =>
+                    item.EventType == "ExecutionRequested" && item.PublishedAtUtc == null);
+                if (!queued) await Task.Delay(100);
+            }
+            Assert.True(queued);
+        }
+        await using (var executionDb = new WorkshopDbContext(dbOptions))
+        {
+            var sender = new SqsIntegrationMessageSender(sqs,
+                new Dictionary<string, string> { ["ExecutionRequested"] = executionQueueUrl });
+            Assert.Equal(1, await new OutboxDispatcher(executionDb, sender,
+                NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
+        }
+        WorkOrderProcessState executionState = WorkOrderProcessState.ReadyForExecution;
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            while (executionState == WorkOrderProcessState.ReadyForExecution &&
+                   !timeout.IsCancellationRequested)
+            {
+                await using var verify = new WorkshopDbContext(dbOptions);
+                executionState = (await verify.WorkOrders.SingleAsync(item => item.Id == orderId)).ProcessState;
+                if (executionState == WorkOrderProcessState.ReadyForExecution)
+                    await Task.Delay(100);
+            }
+        }
+        await executionWorker.StopAsync(CancellationToken.None);
+        await executionOutbox.StopAsync(CancellationToken.None);
+        await osWorker.StopAsync(CancellationToken.None);
+        Assert.Equal(WorkOrderProcessState.InExecution, executionState);
         await using var paymentDb = new WorkshopDbContext(dbOptions);
-        Assert.Equal(4, await paymentDb.InboxMessages.CountAsync());
+        Assert.Equal(WorkOrderStatus.InExecution,
+            (await paymentDb.WorkOrders.SingleAsync(item => item.Id == orderId)).Status);
+        Assert.Equal(6, await paymentDb.InboxMessages.CountAsync());
+        await using var finalExecution = new ExecutionDbContext(executionOptions);
+        Assert.Equal(ReservationStatus.Consumed,
+            (await finalExecution.StockReservations.SingleAsync()).Status);
     }
 
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken) => Task.FromResult(respond(request));
+    }
 }
