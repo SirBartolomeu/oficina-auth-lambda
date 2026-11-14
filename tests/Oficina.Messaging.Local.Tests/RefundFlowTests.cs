@@ -139,10 +139,17 @@ public sealed class RefundFlowTests
                 } }
             });
         })) { BaseAddress = new Uri("https://api.mercadopago.com/") };
-        var processor = new RefundOrderProcessor(repository,
-            new MercadoPagoQrClient(http, new MercadoPagoQrOptions("test-token", "test-pos")),
-            NullLogger<RefundOrderProcessor>.Instance);
-        Assert.Equal(1, await processor.ProcessBatchAsync(CancellationToken.None));
+        using var refundServices = new ServiceCollection()
+            .AddScoped(_ => new RefundOrderProcessor(repository,
+                new MercadoPagoQrClient(http, new MercadoPagoQrOptions("test-token", "test-pos")),
+                NullLogger<RefundOrderProcessor>.Instance))
+            .BuildServiceProvider();
+        using var refundWorker = new RefundOrderWorker(
+            refundServices.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<RefundOrderWorker>.Instance);
+        await refundWorker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(async () =>
+            (await repository.GetPaymentAttemptAsync(paymentId, CancellationToken.None))?.Status == "Refunded");
         Assert.Equal(1, postCount);
         await outboxWorker.StartAsync(CancellationToken.None);
         await osWorker.StartAsync(CancellationToken.None);
@@ -160,6 +167,7 @@ public sealed class RefundFlowTests
         }
         Assert.Empty(await repository.GetPendingRefundsAsync(CancellationToken.None));
         await billingWorker.StopAsync(CancellationToken.None);
+        await refundWorker.StopAsync(CancellationToken.None);
         await outboxWorker.StopAsync(CancellationToken.None);
         await osWorker.StopAsync(CancellationToken.None);
     }
