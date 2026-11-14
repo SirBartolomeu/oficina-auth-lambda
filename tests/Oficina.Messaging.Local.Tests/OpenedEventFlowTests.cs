@@ -10,6 +10,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Oficina.Billing;
+using OficinaMvp.Api.Messaging;
+using OficinaMvp.Domain.Entities;
 using OsEvents = OficinaMvp.Application.Contracts;
 using OficinaMvp.Infrastructure.Messaging;
 using OficinaMvp.Infrastructure.Persistence;
@@ -20,7 +22,7 @@ namespace Oficina.Messaging.Local.Tests;
 public sealed class OpenedEventFlowTests
 {
     [Fact]
-    public async Task OutboxToSqsToBillingCreatesOneBudgetForDuplicateDelivery()
+    public async Task OutboxRoundTripCreatesBudgetAndMovesOrderToApproval()
     {
         var sqsEndpoint = Environment.GetEnvironmentVariable("MESSAGING_SQS_ENDPOINT")
             ?? throw new InvalidOperationException("Defina MESSAGING_SQS_ENDPOINT para o teste local.");
@@ -31,6 +33,7 @@ public sealed class OpenedEventFlowTests
         using var dynamo = new AmazonDynamoDBClient(new BasicAWSCredentials("local", "local"),
             new AmazonDynamoDBConfig { ServiceURL = dynamoEndpoint });
         var queueUrl = (await sqs.CreateQueueAsync("billing-test-" + Guid.NewGuid().ToString("N"))).QueueUrl;
+        var osQueueUrl = (await sqs.CreateQueueAsync("os-events-test-" + Guid.NewGuid().ToString("N"))).QueueUrl;
         var table = "billing_flow_test_" + Guid.NewGuid().ToString("N");
         await dynamo.CreateTableAsync(new CreateTableRequest
         {
@@ -40,19 +43,26 @@ public sealed class OpenedEventFlowTests
             KeySchema = [new("pk", KeyType.HASH), new("sk", KeyType.RANGE)]
         });
 
-        var orderId = Guid.NewGuid();
+        var customer = new Customer("Cliente Teste", "52998224725", null, null);
+        var vehicle = new Vehicle(customer.Id, "BRA2E19", "VW", "Gol", 2020);
+        var serviceId = Guid.NewGuid();
+        var order = new WorkOrder(customer.Id, vehicle.Id,
+            [new WorkOrderServiceLine(serviceId, "Revisão", 1, 125m)],
+            [], null, DateTime.UtcNow, "sp-centro");
+        var orderId = order.Id;
         var eventId = Guid.NewGuid();
         var envelope = new OsEvents.IntegrationEnvelope<OsEvents.WorkOrderOpenedPayload>(eventId, "WorkOrderOpened", 1,
             orderId, Guid.NewGuid(), orderId, "sp-centro", DateTime.UtcNow,
             new OsEvents.WorkOrderOpenedPayload(1,
-                [new OsEvents.WorkOrderOpenedLine("Service", Guid.NewGuid(), "Revisão", 1, 12500)],
+                [new OsEvents.WorkOrderOpenedLine("Service", serviceId, "Revisão", 1, 12500)],
                 12500, "BRL", DateTime.UtcNow));
         var json = JsonSerializer.Serialize(envelope, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         await using var sqlite = new SqliteConnection("Data Source=:memory:");
         await sqlite.OpenAsync();
-        await using var db = new WorkshopDbContext(
-            new DbContextOptionsBuilder<WorkshopDbContext>().UseSqlite(sqlite).Options);
+        var dbOptions = new DbContextOptionsBuilder<WorkshopDbContext>().UseSqlite(sqlite).Options;
+        await using var db = new WorkshopDbContext(dbOptions);
         await db.Database.EnsureCreatedAsync();
+        db.AddRange(customer, vehicle, order);
         db.OutboxMessages.Add(new OutboxMessage(eventId, "WorkOrderOpened", json, DateTime.UtcNow));
         await db.SaveChangesAsync();
 
@@ -64,7 +74,8 @@ public sealed class OpenedEventFlowTests
             new Dictionary<string, string?>
             {
                 ["DynamoDb:Table"] = table,
-                ["Messaging:WorkOrdersQueueUrl"] = queueUrl
+                ["Messaging:WorkOrdersQueueUrl"] = queueUrl,
+                ["Messaging:OsEventsQueueUrl"] = osQueueUrl
             }).Build();
         var repository = new BillingRepository(dynamo, settings);
         using var services = new ServiceCollection()
@@ -89,9 +100,42 @@ public sealed class OpenedEventFlowTests
         await worker.StopAsync(CancellationToken.None);
         Assert.NotNull(budget);
         var duplicate = await new WorkOrderOpenedHandler(repository).HandleAsync(json, CancellationToken.None);
+        var ready = Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
+
+        using var osServices = new ServiceCollection()
+            .AddScoped(_ => new WorkshopDbContext(dbOptions))
+            .AddScoped<BudgetReadyHandler>()
+            .BuildServiceProvider();
+        using var billingOutbox = new BillingOutboxWorker(sqs,
+            services.GetRequiredService<IServiceScopeFactory>(), settings,
+            NullLogger<BillingOutboxWorker>.Instance);
+        using var osWorker = new OsEventsSqsWorker(sqs,
+            osServices.GetRequiredService<IServiceScopeFactory>(), settings,
+            NullLogger<OsEventsSqsWorker>.Instance);
+        await billingOutbox.StartAsync(CancellationToken.None);
+        await osWorker.StartAsync(CancellationToken.None);
+        WorkOrderStatus status = WorkOrderStatus.Received;
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            while (status != WorkOrderStatus.AwaitingApproval && !timeout.IsCancellationRequested)
+            {
+                await using var verify = new WorkshopDbContext(dbOptions);
+                status = (await verify.WorkOrders.SingleAsync(item => item.Id == orderId)).Status;
+                if (status != WorkOrderStatus.AwaitingApproval)
+                    await Task.Delay(100, timeout.Token);
+            }
+        }
+        await billingOutbox.StopAsync(CancellationToken.None);
+        await osWorker.StopAsync(CancellationToken.None);
 
         Assert.Equal(12500, budget.TotalCents);
         Assert.Equal(budget.WorkOrderId, duplicate.WorkOrderId);
         Assert.NotNull(await repository.GetAsync(orderId, 1, CancellationToken.None));
+        Assert.Equal(WorkOrderStatus.AwaitingApproval, status);
+        await using var finalDb = new WorkshopDbContext(dbOptions);
+        Assert.Equal(budget.Id, (await finalDb.WorkOrders.SingleAsync(item => item.Id == orderId)).BudgetId);
+        Assert.Single(await finalDb.InboxMessages.ToListAsync());
+        Assert.False(await new BudgetReadyHandler(finalDb).HandleAsync(ready.Body, CancellationToken.None));
+        Assert.Empty(await repository.GetPendingOutboxAsync(CancellationToken.None));
     }
 }

@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/OficinaMvp.Infrastructure/OficinaMvp.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/OficinaMvp.Api/OficinaMvp.Api.csproj" />
     <ProjectReference Include="../../services/Oficina.Billing/Oficina.Billing.csproj" />
   </ItemGroup>
 </Project>

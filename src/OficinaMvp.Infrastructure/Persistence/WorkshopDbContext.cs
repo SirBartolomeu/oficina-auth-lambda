@@ -15,9 +15,17 @@ public sealed class WorkshopDbContext : DbContext
     public DbSet<PartSupply> PartSupplies => Set<PartSupply>();
     public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<InboxMessage>(entity =>
+        {
+            entity.ToTable("inbox_messages");
+            entity.HasKey(item => item.EventId);
+            entity.Property(item => item.EventType).IsRequired().HasMaxLength(80);
+        });
+
         modelBuilder.Entity<OutboxMessage>(entity =>
         {
             entity.ToTable("outbox_messages");

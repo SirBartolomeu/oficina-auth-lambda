@@ -89,6 +89,13 @@ Configuracao principal:
 - `ConnectionStrings__DefaultConnection=...`
 - `Database__UseMigrations=false` no ambiente local da entrega
 
+Para a integração distribuída em evolução, a API OS usa `Execution__BaseUrl` e
+`Execution__InternalToken` para cotação remota. `Messaging__BillingQueueUrl`
+ativa a publicação de `WorkOrderOpened`; `Messaging__OsEventsQueueUrl` ativa
+o consumo de `BudgetReady`. `Messaging__SqsServiceUrl` aponta apenas para o
+emulador local. O roteiro de teste da ida e volta está em
+`services/Oficina.Billing/README.md`.
+
 A partir da evolução para .NET 10, uma migration inicial PostgreSQL foi versionada em `src/OficinaMvp.Infrastructure/Persistence/Migrations`. Em `Production`, a API aplica migrations independentemente de `Database__UseMigrations`; em desenvolvimento com banco já criado por `EnsureCreated`, mantenha o banco local e não altere a flag sem planejar a migração dos dados. A migration PostgreSQL não é aplicada aos testes SQLite em memória.
 
 ## Seed de demo

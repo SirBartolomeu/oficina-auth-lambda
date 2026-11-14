@@ -13,6 +13,8 @@ public sealed record Budget(
     IReadOnlyCollection<BudgetLine> Lines,
     DateTime CreatedAtUtc)
 {
+    public Guid Id { get; init; } = Guid.NewGuid();
+
     public static Budget Create(Guid workOrderId, int version, string? branchId, IReadOnlyCollection<BudgetLine> lines)
     {
         if (workOrderId == Guid.Empty || version <= 0 || lines.Count == 0)

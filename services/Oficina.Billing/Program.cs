@@ -25,7 +25,9 @@ builder.Services.AddSingleton<IAmazonDynamoDB>(_ => string.IsNullOrWhiteSpace(se
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<IBudgetEventStore>(provider => provider.GetRequiredService<BillingRepository>());
 builder.Services.AddScoped<WorkOrderOpenedHandler>();
-if (!string.IsNullOrWhiteSpace(builder.Configuration["Messaging:WorkOrdersQueueUrl"]))
+var workOrdersQueueUrl = builder.Configuration["Messaging:WorkOrdersQueueUrl"];
+var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];
+if (!string.IsNullOrWhiteSpace(workOrdersQueueUrl) || !string.IsNullOrWhiteSpace(osEventsQueueUrl))
 {
     var sqsServiceUrl = builder.Configuration["Messaging:SqsServiceUrl"];
     builder.Services.AddSingleton<IAmazonSQS>(_ => string.IsNullOrWhiteSpace(sqsServiceUrl)
@@ -34,7 +36,10 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["Messaging:WorkOrdersQueueU
         {
             ServiceURL = sqsServiceUrl
         }));
-    builder.Services.AddHostedService<BillingSqsWorker>();
+    if (!string.IsNullOrWhiteSpace(workOrdersQueueUrl))
+        builder.Services.AddHostedService<BillingSqsWorker>();
+    if (!string.IsNullOrWhiteSpace(osEventsQueueUrl))
+        builder.Services.AddHostedService<BillingOutboxWorker>();
 }
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

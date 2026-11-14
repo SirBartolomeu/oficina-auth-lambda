@@ -155,12 +155,18 @@ namespace OficinaMvp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<Guid?>("BudgetId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("BudgetSentAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<decimal>("BudgetTotal")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
+
+                    b.Property<int?>("BudgetVersion")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -307,6 +313,25 @@ namespace OficinaMvp.Infrastructure.Persistence.Migrations
                     b.HasIndex("WorkOrderId");
 
                     b.ToTable("work_order_status_history", (string)null);
+                });
+
+            modelBuilder.Entity("OficinaMvp.Infrastructure.Persistence.InboxMessage", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime>("ReceivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("EventId");
+
+                    b.ToTable("inbox_messages", (string)null);
                 });
 
             modelBuilder.Entity("OficinaMvp.Infrastructure.Persistence.OutboxMessage", b =>

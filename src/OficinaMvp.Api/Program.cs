@@ -49,7 +49,8 @@ builder.Services.AddScoped<WorkshopCatalogApplicationService>();
 builder.Services.AddScoped<WorkOrderApplicationService>();
 
 var billingQueueUrl = builder.Configuration["Messaging:BillingQueueUrl"];
-if (!string.IsNullOrWhiteSpace(billingQueueUrl))
+var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];
+if (!string.IsNullOrWhiteSpace(billingQueueUrl) || !string.IsNullOrWhiteSpace(osEventsQueueUrl))
 {
     var sqsServiceUrl = builder.Configuration["Messaging:SqsServiceUrl"];
     var region = RegionEndpoint.GetBySystemName(builder.Configuration["AWS:Region"] ?? "us-east-1");
@@ -59,10 +60,18 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl))
         {
             ServiceURL = sqsServiceUrl
         }));
-    builder.Services.AddSingleton<IIntegrationMessageSender>(serviceProvider =>
-        new SqsIntegrationMessageSender(serviceProvider.GetRequiredService<IAmazonSQS>(), billingQueueUrl));
-    builder.Services.AddScoped<OutboxDispatcher>();
-    builder.Services.AddHostedService<OutboxBackgroundService>();
+    if (!string.IsNullOrWhiteSpace(billingQueueUrl))
+    {
+        builder.Services.AddSingleton<IIntegrationMessageSender>(serviceProvider =>
+            new SqsIntegrationMessageSender(serviceProvider.GetRequiredService<IAmazonSQS>(), billingQueueUrl));
+        builder.Services.AddScoped<OutboxDispatcher>();
+        builder.Services.AddHostedService<OutboxBackgroundService>();
+    }
+    if (!string.IsNullOrWhiteSpace(osEventsQueueUrl))
+    {
+        builder.Services.AddScoped<BudgetReadyHandler>();
+        builder.Services.AddHostedService<OsEventsSqsWorker>();
+    }
 }
 
 var executionBaseUrl = builder.Configuration["Execution:BaseUrl"];

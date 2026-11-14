@@ -42,12 +42,22 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         }
     }
 
-    public async Task<Budget> CreateFromEventAsync(Guid eventId, Budget proposed,
+    public async Task<Budget> CreateFromEventAsync(Guid eventId, Budget proposed, BudgetReadyEnvelope ready,
         CancellationToken cancellationToken)
     {
         if (eventId == Guid.Empty) throw new ArgumentException("Identificador do evento obrigatório.");
+        if (ready.EventId == Guid.Empty || ready.EventType != "BudgetReady" ||
+            ready.CausationId != eventId || ready.WorkOrderId != proposed.WorkOrderId ||
+            ready.BranchId != proposed.BranchId || ready.Payload.BudgetId != proposed.Id ||
+            ready.Payload.BudgetVersion != proposed.Version ||
+            ready.Payload.TotalCents != proposed.TotalCents || ready.Payload.Currency != "BRL")
+            throw new ArgumentException("BudgetReady não corresponde ao orçamento criado.");
         var inboxItem = InboxKey(eventId);
         inboxItem["receivedAtUtc"] = new AttributeValue { S = DateTime.UtcNow.ToString("O") };
+        var outboxItem = OutboxKey(ready.EventId);
+        outboxItem["body"] = new AttributeValue { S = JsonSerializer.Serialize(ready,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outboxItem["occurredAtUtc"] = new AttributeValue { S = ready.OccurredAtUtc.ToString("O") };
         try
         {
             await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
@@ -62,6 +72,11 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
                     new TransactWriteItem { Put = new Put
                     {
                         TableName = _table, Item = inboxItem,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = outboxItem,
                         ConditionExpression = "attribute_not_exists(pk)"
                     } }
                 ]
@@ -84,6 +99,31 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             return current;
         }
     }
+
+    public async Task<IReadOnlyCollection<BillingOutboxMessage>> GetPendingOutboxAsync(
+        CancellationToken cancellationToken)
+    {
+        var response = await dynamo.QueryAsync(new QueryRequest
+        {
+            TableName = _table,
+            KeyConditionExpression = "pk = :pk",
+            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+            {
+                [":pk"] = new() { S = "OUTBOX#PENDING" }
+            },
+            Limit = 10,
+            ConsistentRead = true
+        }, cancellationToken);
+        return (response.Items ?? []).Select(item => new BillingOutboxMessage(
+            Guid.ParseExact(item["sk"].S, "N"), item["body"].S)).ToArray();
+    }
+
+    public Task MarkOutboxPublishedAsync(Guid eventId, CancellationToken cancellationToken) =>
+        dynamo.DeleteItemAsync(new DeleteItemRequest
+        {
+            TableName = _table,
+            Key = OutboxKey(eventId)
+        }, cancellationToken);
 
     public async Task<Budget?> GetAsync(Guid workOrderId, int version, CancellationToken cancellationToken)
     {
@@ -144,9 +184,16 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         ["sk"] = new() { S = "RECEIVED" }
     };
 
+    private static Dictionary<string, AttributeValue> OutboxKey(Guid eventId) => new()
+    {
+        ["pk"] = new() { S = "OUTBOX#PENDING" },
+        ["sk"] = new() { S = eventId.ToString("N") }
+    };
+
     private static Dictionary<string, AttributeValue> ToItem(Budget budget)
     {
         var item = Key(budget.WorkOrderId, budget.Version);
+        item["budgetId"] = new AttributeValue { S = budget.Id.ToString("D") };
         item["branchId"] = new AttributeValue { S = budget.BranchId ?? string.Empty };
         item["totalCents"] = new AttributeValue { N = budget.TotalCents.ToString(System.Globalization.CultureInfo.InvariantCulture) };
         item["status"] = new AttributeValue { S = budget.Status.ToString() };
@@ -166,6 +213,11 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             long.Parse(item["totalCents"].N, System.Globalization.CultureInfo.InvariantCulture),
             Enum.Parse<BudgetStatus>(item["status"].S),
             JsonSerializer.Deserialize<BudgetLine[]>(item["lines"].S) ?? [],
-            DateTime.Parse(item["createdAtUtc"].S, null, System.Globalization.DateTimeStyles.RoundtripKind));
+            DateTime.Parse(item["createdAtUtc"].S, null, System.Globalization.DateTimeStyles.RoundtripKind))
+        {
+            Id = item.TryGetValue("budgetId", out var budgetId) ? Guid.Parse(budgetId.S) : Guid.Empty
+        };
     }
 }
+
+public sealed record BillingOutboxMessage(Guid EventId, string Body);

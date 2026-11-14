@@ -44,9 +44,12 @@ public sealed class WorkOrderOpenedHandlerTests
     private sealed class RecordingStore : IBudgetEventStore
     {
         public int Calls { get; private set; }
-        public Task<Budget> CreateFromEventAsync(Guid eventId, Budget proposed,
+        public Task<Budget> CreateFromEventAsync(Guid eventId, Budget proposed, BudgetReadyEnvelope ready,
             CancellationToken cancellationToken)
         {
+            Assert.Equal(eventId, ready.CausationId);
+            Assert.Equal(proposed.Id, ready.Payload.BudgetId);
+            Assert.Equal(proposed.TotalCents, ready.Payload.TotalCents);
             Calls++;
             return Task.FromResult(proposed);
         }

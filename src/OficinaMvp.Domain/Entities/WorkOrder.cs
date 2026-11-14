@@ -53,6 +53,8 @@ public sealed class WorkOrder
     public Guid VehicleId { get; private set; }
     public WorkOrderStatus Status { get; private set; }
     public WorkOrderProcessState ProcessState { get; private set; }
+    public Guid? BudgetId { get; private set; }
+    public int? BudgetVersion { get; private set; }
     public string Notes { get; private set; } = string.Empty;
     public string? BranchId { get; private set; }
     public decimal ServicesTotal { get; private set; }
@@ -90,6 +92,24 @@ public sealed class WorkOrder
         BudgetSentAtUtc = changedAtUtc;
         ProcessState = WorkOrderProcessState.AwaitingApproval;
         ChangeStatus(WorkOrderStatus.AwaitingApproval, changedAtUtc, "Orçamento enviado para aprovação do cliente.");
+    }
+
+    public void AcceptBudgetReady(Guid budgetId, int budgetVersion, DateTime changedAtUtc)
+    {
+        if (budgetId == Guid.Empty || budgetVersion <= 0)
+            throw new DomainException("Identificação do orçamento inválida.");
+        if (BudgetId.HasValue)
+        {
+            if (BudgetId == budgetId && BudgetVersion == budgetVersion) return;
+            throw new DomainException("A OS já possui outro orçamento ativo.");
+        }
+        if (ProcessState != WorkOrderProcessState.AwaitingBudget ||
+            Status is not WorkOrderStatus.Received and not WorkOrderStatus.InDiagnosis)
+            throw new DomainException("A OS não está aguardando orçamento do Billing.");
+
+        BudgetId = budgetId;
+        BudgetVersion = budgetVersion;
+        SendBudget(changedAtUtc);
     }
 
     public void ApproveBudget(DateTime changedAtUtc)

@@ -76,6 +76,24 @@ public sealed class WorkOrderTests
     }
 
     [Fact]
+    public void BudgetReady_ShouldMoveToApprovalOnceAndRejectConflictingBudget()
+    {
+        var order = BuildDefaultWorkOrder();
+        var budgetId = Guid.NewGuid();
+        var occurredAt = DateTime.UtcNow;
+
+        order.AcceptBudgetReady(budgetId, 1, occurredAt);
+        order.AcceptBudgetReady(budgetId, 1, occurredAt);
+
+        Assert.Equal(WorkOrderStatus.AwaitingApproval, order.Status);
+        Assert.Equal(WorkOrderProcessState.AwaitingApproval, order.ProcessState);
+        Assert.Equal(budgetId, order.BudgetId);
+        Assert.Equal(1, order.BudgetVersion);
+        Assert.Equal(2, order.StatusHistory.Count);
+        Assert.Throws<DomainException>(() => order.AcceptBudgetReady(Guid.NewGuid(), 1, occurredAt));
+    }
+
+    [Fact]
     public void DistributedFlow_ShouldWaitForReservationAndPaymentBeforeExecution()
     {
         var now = DateTime.UtcNow;

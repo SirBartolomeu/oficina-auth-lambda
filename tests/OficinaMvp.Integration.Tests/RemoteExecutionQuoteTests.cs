@@ -7,6 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 using OficinaMvp.Application.Contracts;
 using OficinaMvp.Application.Ports;
 using OficinaMvp.Infrastructure.Persistence;
+using OficinaMvp.Infrastructure.Messaging;
+using OficinaMvp.Domain.Exceptions;
 using OficinaMvp.Integration.Tests.Infrastructure;
 
 namespace OficinaMvp.Integration.Tests;
@@ -44,6 +46,29 @@ public sealed class RemoteExecutionQuoteTests
         Assert.Equal(order.GetProperty("id").GetGuid(), envelope.RootElement.GetProperty("workOrderId").GetGuid());
         Assert.Equal(19000, envelope.RootElement.GetProperty("payload").GetProperty("totalCents").GetInt64());
         Assert.Equal(2, envelope.RootElement.GetProperty("payload").GetProperty("lines").GetArrayLength());
+
+        var orderId = order.GetProperty("id").GetGuid();
+        var readyEventId = Guid.NewGuid();
+        var budgetId = Guid.NewGuid();
+        var ready = new IntegrationEnvelope<BudgetReadyPayload>(readyEventId, "BudgetReady", 1,
+            orderId, outbox.EventId, orderId, null, DateTime.UtcNow,
+            new BudgetReadyPayload(budgetId, 1, 19000, "BRL"));
+        var readyJson = JsonSerializer.Serialize(ready, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var handler = new BudgetReadyHandler(scope.ServiceProvider.GetRequiredService<WorkshopDbContext>());
+        Assert.True(await handler.HandleAsync(readyJson, CancellationToken.None));
+        Assert.False(await handler.HandleAsync(readyJson, CancellationToken.None));
+        Assert.Single(await scope.ServiceProvider.GetRequiredService<WorkshopDbContext>()
+            .InboxMessages.AsNoTracking().ToListAsync());
+        var updated = await client.GetFromJsonAsync<JsonElement>($"/api/work-orders/{orderId}");
+        Assert.Equal("AwaitingApproval", updated.GetProperty("status").GetString());
+
+        var invalid = ready with { EventId = Guid.NewGuid(),
+            Payload = new BudgetReadyPayload(budgetId, 1, 9999, "BRL") };
+        await Assert.ThrowsAsync<DomainException>(() => handler.HandleAsync(
+            JsonSerializer.Serialize(invalid, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CancellationToken.None));
+        Assert.Single(await scope.ServiceProvider.GetRequiredService<WorkshopDbContext>()
+            .InboxMessages.AsNoTracking().ToListAsync());
     }
 
     [Fact]

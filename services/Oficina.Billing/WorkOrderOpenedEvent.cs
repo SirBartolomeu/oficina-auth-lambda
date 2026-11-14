@@ -8,6 +8,10 @@ public sealed record WorkOrderOpenedPayload(int OrderVersion, IReadOnlyCollectio
 public sealed record WorkOrderOpenedEnvelope(Guid EventId, string EventType, int SchemaVersion,
     Guid CorrelationId, Guid CausationId, Guid WorkOrderId, string? BranchId,
     DateTime OccurredAtUtc, WorkOrderOpenedPayload Payload);
+public sealed record BudgetReadyPayload(Guid BudgetId, int BudgetVersion, long TotalCents, string Currency);
+public sealed record BudgetReadyEnvelope(Guid EventId, string EventType, int SchemaVersion,
+    Guid CorrelationId, Guid CausationId, Guid WorkOrderId, string? BranchId,
+    DateTime OccurredAtUtc, BudgetReadyPayload Payload);
 
 public sealed class WorkOrderOpenedHandler(IBudgetEventStore repository)
 {
@@ -24,9 +28,13 @@ public sealed class WorkOrderOpenedHandler(IBudgetEventStore repository)
 
         var budget = Budget.Create(envelope.WorkOrderId, envelope.Payload.OrderVersion,
             envelope.BranchId, envelope.Payload.Lines.Select(line =>
-                new BudgetLine(line.ItemId, line.Name, line.Quantity, line.UnitPriceCents)).ToArray());
+                new BudgetLine(line.ItemId, line.Name, line.Quantity, line.UnitPriceCents)).ToArray())
+            with { Id = envelope.EventId };
         if (budget.TotalCents != envelope.Payload.TotalCents)
             throw new ArgumentException("Total do evento não corresponde às linhas.");
-        return await repository.CreateFromEventAsync(envelope.EventId, budget, cancellationToken);
+        var ready = new BudgetReadyEnvelope(Guid.NewGuid(), "BudgetReady", 1,
+            envelope.CorrelationId, envelope.EventId, envelope.WorkOrderId, envelope.BranchId,
+            DateTime.UtcNow, new BudgetReadyPayload(budget.Id, budget.Version, budget.TotalCents, "BRL"));
+        return await repository.CreateFromEventAsync(envelope.EventId, budget, ready, cancellationToken);
     }
 }

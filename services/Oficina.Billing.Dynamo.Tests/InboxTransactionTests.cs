@@ -30,9 +30,13 @@ public sealed class InboxTransactionTests
             var budget = Budget.Create(Guid.NewGuid(), 1, "sp-centro",
                 [new BudgetLine(Guid.NewGuid(), "Revisão", 2, 1250)]);
             var eventId = Guid.NewGuid();
+            var ready = new BudgetReadyEnvelope(Guid.NewGuid(), "BudgetReady", 1,
+                budget.WorkOrderId, eventId, budget.WorkOrderId, budget.BranchId,
+                DateTime.UtcNow, new BudgetReadyPayload(budget.Id, budget.Version,
+                    budget.TotalCents, "BRL"));
 
-            var first = await repository.CreateFromEventAsync(eventId, budget, CancellationToken.None);
-            var second = await repository.CreateFromEventAsync(eventId, budget, CancellationToken.None);
+            var first = await repository.CreateFromEventAsync(eventId, budget, ready, CancellationToken.None);
+            var second = await repository.CreateFromEventAsync(eventId, budget, ready, CancellationToken.None);
 
             Assert.Equal(first.WorkOrderId, second.WorkOrderId);
             Assert.Equal(2500, second.TotalCents);
@@ -43,7 +47,11 @@ public sealed class InboxTransactionTests
                 ["sk"] = new() { S = "RECEIVED" }
             });
             Assert.NotEmpty(inbox.Item);
+            Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.CreateFromEventAsync(
+            eventId, budget with { TotalCents = 9999 }, ready, CancellationToken.None));
+        var conflictingReady = ready with { Payload = ready.Payload with { TotalCents = 9999 } };
         await Assert.ThrowsAsync<InvalidOperationException>(() => repository.CreateFromEventAsync(
-            eventId, budget with { TotalCents = 9999 }, CancellationToken.None));
+            eventId, budget with { TotalCents = 9999 }, conflictingReady, CancellationToken.None));
     }
 }
