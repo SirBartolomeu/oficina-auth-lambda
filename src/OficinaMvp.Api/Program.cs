@@ -77,6 +77,7 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
     if (!string.IsNullOrWhiteSpace(osEventsQueueUrl))
     {
         builder.Services.AddScoped<BudgetReadyHandler>();
+        builder.Services.AddScoped<BudgetDecisionHandler>();
         builder.Services.AddScoped<StockReservationResultHandler>();
         builder.Services.AddHostedService<OsEventsSqsWorker>();
     }

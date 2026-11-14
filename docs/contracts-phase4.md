@@ -26,7 +26,7 @@ Estado: versão 1 do contrato para implementação. Donos dos dados: OS, Execuç
 |---|---|---|---|
 | `WorkOrderOpened` | OS → Billing | `orderVersion`, `lines` (`kind`, `itemId`, `name`, `quantity`, `unitPriceCents`), `totalCents`, `currency=BRL`, `quotedAtUtc` | Criar orçamento versão 1, sem recalcular a partir de preço atual |
 | `BudgetReady` | Billing → OS | `budgetId`, `budgetVersion`, `totalCents`, `currency=BRL` | OS confere valor/filial e muda para aguardando aprovação; duplicata mantém o estado |
-| `BudgetApproved` / `BudgetRefused` | Billing → OS | `budgetId`, `budgetVersion`, `decisionId`, motivo opcional | OS aceita somente decisão da versão corrente; recusa encerra/revisa tentativa |
+| `BudgetApproved` / `BudgetRefused` | Billing → OS | `budgetId`, `budgetVersion`, `decisionId`, motivo opcional | OS aceita somente decisão da versão corrente; aprovação solicita reserva; recusa mantém a OS para revisão |
 | `ReserveStockRequested` | OS → Execução | `reservationId`, `orderVersion`, peças/quantidades, `expiresAtUtc` | Reserva atômica, idempotente e condicionada a saldo; emite confirmado/recusado |
 | `StockReserved` / `StockReservationRejected` | Execução → OS | `reservationId`, `orderVersion`, motivo opcional | Confirmado muda o processo para aguardar pagamento; recusado cancela a tentativa antes da execução |
 | `CreatePaymentRequested` | OS → Billing | `paymentAttemptId`, `budgetId`, `budgetVersion`, `totalCents`, `currency` | Billing cria tentativa com chave estável de idempotência Mercado Pago |
@@ -40,7 +40,7 @@ Os nomes são contratos de integração, não confirmação de serviços já imp
 
 No evento raiz `WorkOrderOpened`, a OS gera `causationId` para a requisição de abertura e usa `workOrderId` como `correlationId`. A Outbox SQL armazena o envelope JSON na mesma transação que grava a OS. O Billing grava orçamento, Inbox e `BudgetReady` pendente em uma transação DynamoDB. Seu publicador envia a resposta por SQS; a OS registra Inbox e transição de estado na mesma transação SQL. O `budgetId` da versão criada a partir desse evento usa o `eventId` de `WorkOrderOpened`, garantindo identidade estável em reentregas. Os comandos de pagamento, execução e compensação ainda não estão implementados.
 
-Após aprovação na OS com cotação remota, `ReserveStockRequested` é gravado na Outbox SQL junto com o estado `AwaitingStockReservation`. Execução valida prazo e saldo, grava reserva, Inbox e resultado na mesma transação; a OS valida `reservationId`, versão e filial antes de aceitar `StockReserved` ou `StockReservationRejected`. A recusa cancela a tentativa sem iniciar serviço ou cobrança. A decisão de aprovação ainda vem do endpoint legado da OS; a aprovação via Billing será integrada no corte final da Saga.
+A decisão de aprovação ou recusa é gravada pelo Billing junto com seu evento na mesma transação DynamoDB. No modo distribuído, a OS não aceita aprovação direta pelo endpoint legado. Ao consumir `BudgetApproved`, a OS grava `ReserveStockRequested` na Outbox SQL junto com o estado `AwaitingStockReservation`; `BudgetRefused` registra a recusa para revisão. Execução valida prazo e saldo, grava reserva, Inbox e resultado na mesma transação; a OS valida `reservationId`, versão e filial antes de aceitar `StockReserved` ou `StockReservationRejected`. A recusa da reserva cancela a tentativa sem iniciar serviço ou cobrança.
 
 ## REST síncrono necessário
 

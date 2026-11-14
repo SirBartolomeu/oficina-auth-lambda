@@ -147,24 +147,46 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         }
 
         var updated = existing.Decide(approved);
+        var decisionId = Guid.NewGuid();
+        var occurredAt = DateTime.UtcNow;
+        var decision = new BudgetDecisionEnvelope(decisionId,
+            approved ? "BudgetApproved" : "BudgetRefused", 1, workOrderId, Guid.NewGuid(),
+            workOrderId, existing.BranchId, occurredAt,
+            new BudgetDecisionPayload(existing.Id, version, decisionId, null));
+        var outboxItem = OutboxKey(decisionId);
+        outboxItem["body"] = new AttributeValue { S = JsonSerializer.Serialize(decision,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outboxItem["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
         try
         {
-            await dynamo.UpdateItemAsync(new UpdateItemRequest
+            await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
             {
-                TableName = _table,
-                Key = Key(workOrderId, version),
-                ConditionExpression = "#status = :previous",
-                UpdateExpression = "SET #status = :new",
-                ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
-                ExpressionAttributeValues = new Dictionary<string, AttributeValue>
-                {
-                    [":previous"] = new() { S = BudgetStatus.AwaitingApproval.ToString() },
-                    [":new"] = new() { S = updated.Status.ToString() }
-                }
+                TransactItems =
+                [
+                    new TransactWriteItem { Update = new Update
+                    {
+                        TableName = _table,
+                        Key = Key(workOrderId, version),
+                        ConditionExpression = "#status = :previous",
+                        UpdateExpression = "SET #status = :new, decisionId = :decisionId",
+                        ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                        ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                        {
+                            [":previous"] = new() { S = BudgetStatus.AwaitingApproval.ToString() },
+                            [":new"] = new() { S = updated.Status.ToString() },
+                            [":decisionId"] = new() { S = decisionId.ToString("D") }
+                        }
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = outboxItem,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } }
+                ]
             }, cancellationToken);
             return updated;
         }
-        catch (ConditionalCheckFailedException)
+        catch (TransactionCanceledException)
         {
             var current = await GetAsync(workOrderId, version, cancellationToken);
             if (current?.Status == updated.Status) return current;

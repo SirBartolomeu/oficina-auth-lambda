@@ -61,8 +61,21 @@ public sealed class RemoteExecutionQuoteTests
         Assert.Single(await scope.ServiceProvider.GetRequiredService<WorkshopDbContext>()
             .InboxMessages.AsNoTracking().ToListAsync());
 
-        var approval = await client.PostAsJsonAsync($"/api/work-orders/{orderId}/approve-budget", new { });
-        approval.EnsureSuccessStatusCode();
+        var directApproval = await client.PostAsJsonAsync($"/api/work-orders/{orderId}/approve-budget", new { });
+        Assert.Equal(HttpStatusCode.BadRequest, directApproval.StatusCode);
+
+        var decisionId = Guid.NewGuid();
+        var decision = new IntegrationEnvelope<BudgetDecisionPayload>(decisionId, "BudgetApproved", 1,
+            orderId, readyEventId, orderId, null, DateTime.UtcNow,
+            new BudgetDecisionPayload(budgetId, 1, decisionId, null));
+        var decisionBody = JsonSerializer.Serialize(decision, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using (var decisionScope = factory.Services.CreateScope())
+        {
+            var decisionHandler = new BudgetDecisionHandler(
+                decisionScope.ServiceProvider.GetRequiredService<WorkshopDbContext>());
+            Assert.True(await decisionHandler.HandleAsync(decisionBody, CancellationToken.None));
+            Assert.False(await decisionHandler.HandleAsync(decisionBody, CancellationToken.None));
+        }
         var db = scope.ServiceProvider.GetRequiredService<WorkshopDbContext>();
         var approved = await db.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId);
         Assert.Equal(WorkOrderProcessState.AwaitingStockReservation, approved.ProcessState);
@@ -91,7 +104,48 @@ public sealed class RemoteExecutionQuoteTests
         await Assert.ThrowsAsync<DomainException>(() => handler.HandleAsync(
             JsonSerializer.Serialize(invalid, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             CancellationToken.None));
-        Assert.Equal(2, await resultDb.InboxMessages.AsNoTracking().CountAsync());
+        Assert.Equal(3, await resultDb.InboxMessages.AsNoTracking().CountAsync());
+    }
+
+    [Fact]
+    public async Task BillingRefusalKeepsOrderAwaitingReviewWithoutReservingStock()
+    {
+        var serviceId = Guid.NewGuid();
+        var partId = Guid.NewGuid();
+        using var factory = new CustomWebApplicationFactory
+        {
+            ExecutionQuoteClient = new StubQuoteClient((_, _) => new ExecutionQuoteResponse(
+                [new ExecutionQuotedItem(serviceId, "Revisão", 1, 12500)],
+                [new ExecutionQuotedItem(partId, "Filtro", 2, 3250)], 19000))
+        };
+        using var client = factory.CreateClient();
+        await AuthenticateAndCreateCustomerAsync(client);
+        var response = await client.PostAsJsonAsync("/api/work-orders", NewRequest(serviceId, partId));
+        response.EnsureSuccessStatusCode();
+        var orderId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<WorkshopDbContext>();
+        var openedId = (await db.OutboxMessages.AsNoTracking().SingleAsync()).EventId;
+        var budgetId = Guid.NewGuid();
+        var ready = new IntegrationEnvelope<BudgetReadyPayload>(Guid.NewGuid(), "BudgetReady", 1,
+            orderId, openedId, orderId, null, DateTime.UtcNow,
+            new BudgetReadyPayload(budgetId, 1, 19000, "BRL"));
+        Assert.True(await new BudgetReadyHandler(db).HandleAsync(
+            JsonSerializer.Serialize(ready, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CancellationToken.None));
+        var decisionId = Guid.NewGuid();
+        var refused = new IntegrationEnvelope<BudgetDecisionPayload>(decisionId, "BudgetRefused", 1,
+            orderId, ready.EventId, orderId, null, DateTime.UtcNow,
+            new BudgetDecisionPayload(budgetId, 1, decisionId, "Cliente recusou"));
+        using var decisionScope = factory.Services.CreateScope();
+        var decisionDb = decisionScope.ServiceProvider.GetRequiredService<WorkshopDbContext>();
+        Assert.True(await new BudgetDecisionHandler(decisionDb).HandleAsync(
+            JsonSerializer.Serialize(refused, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CancellationToken.None));
+        Assert.Equal(WorkOrderProcessState.AwaitingApproval,
+            (await decisionDb.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId)).ProcessState);
+        Assert.Empty(await decisionDb.OutboxMessages.AsNoTracking()
+            .Where(item => item.EventType == "ReserveStockRequested").ToListAsync());
     }
 
     [Fact]

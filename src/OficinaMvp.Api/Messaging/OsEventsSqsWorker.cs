@@ -30,6 +30,9 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                         if (eventType == "BudgetReady")
                             await scope.ServiceProvider.GetRequiredService<BudgetReadyHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType is "BudgetApproved" or "BudgetRefused")
+                            await scope.ServiceProvider.GetRequiredService<BudgetDecisionHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
                         else if (eventType is "StockReserved" or "StockReservationRejected")
                             await scope.ServiceProvider.GetRequiredService<StockReservationResultHandler>()
                                 .HandleAsync(message.Body, stoppingToken);

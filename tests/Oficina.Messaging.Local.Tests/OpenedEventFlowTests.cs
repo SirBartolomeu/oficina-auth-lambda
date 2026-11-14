@@ -105,6 +105,7 @@ public sealed class OpenedEventFlowTests
         using var osServices = new ServiceCollection()
             .AddScoped(_ => new WorkshopDbContext(dbOptions))
             .AddScoped<BudgetReadyHandler>()
+            .AddScoped<BudgetDecisionHandler>()
             .BuildServiceProvider();
         using var billingOutbox = new BillingOutboxWorker(sqs,
             services.GetRequiredService<IServiceScopeFactory>(), settings,
@@ -125,9 +126,6 @@ public sealed class OpenedEventFlowTests
                     await Task.Delay(100, timeout.Token);
             }
         }
-        await billingOutbox.StopAsync(CancellationToken.None);
-        await osWorker.StopAsync(CancellationToken.None);
-
         Assert.Equal(12500, budget.TotalCents);
         Assert.Equal(budget.WorkOrderId, duplicate.WorkOrderId);
         Assert.NotNull(await repository.GetAsync(orderId, 1, CancellationToken.None));
@@ -137,5 +135,34 @@ public sealed class OpenedEventFlowTests
         Assert.Single(await finalDb.InboxMessages.ToListAsync());
         Assert.False(await new BudgetReadyHandler(finalDb).HandleAsync(ready.Body, CancellationToken.None));
         Assert.Empty(await repository.GetPendingOutboxAsync(CancellationToken.None));
+
+        var approved = await repository.DecideAsync(orderId, 1, true, CancellationToken.None);
+        Assert.Equal(BudgetStatus.Approved, approved!.Status);
+        Assert.Equal(BudgetStatus.Approved,
+            (await repository.DecideAsync(orderId, 1, true, CancellationToken.None))!.Status);
+        var decision = Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
+        WorkOrderProcessState decisionState = WorkOrderProcessState.AwaitingApproval;
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            while (decisionState == WorkOrderProcessState.AwaitingApproval && !timeout.IsCancellationRequested)
+            {
+                await using var verify = new WorkshopDbContext(dbOptions);
+                decisionState = (await verify.WorkOrders.SingleAsync(item => item.Id == orderId)).ProcessState;
+                if (decisionState == WorkOrderProcessState.AwaitingApproval)
+                    await Task.Delay(100);
+            }
+        }
+        await billingOutbox.StopAsync(CancellationToken.None);
+        await osWorker.StopAsync(CancellationToken.None);
+        await using var decisionDb = new WorkshopDbContext(dbOptions);
+        Assert.False(await new BudgetDecisionHandler(decisionDb).HandleAsync(decision.Body, CancellationToken.None));
+        var decidedOrder = await decisionDb.WorkOrders.SingleAsync(item => item.Id == orderId);
+        Assert.Equal(WorkOrderProcessState.AwaitingStockReservation, decisionState);
+        Assert.Equal(decisionState, decidedOrder.ProcessState);
+        Assert.Equal(2, await decisionDb.InboxMessages.CountAsync());
+        Assert.Single(await decisionDb.OutboxMessages
+            .Where(item => item.EventType == "ReserveStockRequested").ToListAsync());
+        Assert.Empty(await repository.GetPendingOutboxAsync(CancellationToken.None));
     }
+
 }
