@@ -1,6 +1,10 @@
 extern alias execution;
 
+using System.Net;
+using System.Text;
 using System.Text.Json;
+using Amazon.DynamoDBv2;
+using Amazon.DynamoDBv2.Model;
 using Amazon.Runtime;
 using Amazon.SQS;
 using Microsoft.Data.Sqlite;
@@ -23,6 +27,7 @@ using OficinaMvp.Application.Contracts;
 using OficinaMvp.Domain.Entities;
 using OficinaMvp.Infrastructure.Messaging;
 using OficinaMvp.Infrastructure.Persistence;
+using Billing = Oficina.Billing;
 using Xunit;
 
 namespace Oficina.Messaging.Local.Tests;
@@ -204,13 +209,64 @@ public sealed class StockReservationFlowTests
             }
             else
             {
-            var rejected = new IntegrationEnvelope<PaymentRejectedPayload>(Guid.NewGuid(),
-                "PaymentRejected", 1, order.Id, Guid.NewGuid(), order.Id, order.BranchId,
-                DateTime.UtcNow, new PaymentRejectedPayload(
-                    pendingOrder.PaymentAttemptId!.Value, "ORDTEST123", requested * 1000L,
-                    "BRL", rejectionReason));
-            await sqs.SendMessageAsync(osQueue, JsonSerializer.Serialize(rejected,
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            var dynamoEndpoint = Environment.GetEnvironmentVariable("BILLING_DYNAMO_ENDPOINT")
+                ?? throw new InvalidOperationException("Defina BILLING_DYNAMO_ENDPOINT para o teste local.");
+            using var dynamo = new AmazonDynamoDBClient(new BasicAWSCredentials("local", "local"),
+                new AmazonDynamoDBConfig { ServiceURL = dynamoEndpoint });
+            var table = "billing_release_" + Guid.NewGuid().ToString("N");
+            await dynamo.CreateTableAsync(new CreateTableRequest
+            {
+                TableName = table, BillingMode = BillingMode.PAY_PER_REQUEST,
+                AttributeDefinitions = [new("pk", ScalarAttributeType.S), new("sk", ScalarAttributeType.S)],
+                KeySchema = [new("pk", KeyType.HASH), new("sk", KeyType.RANGE)]
+            });
+            var billingSettings = new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["DynamoDb:Table"] = table,
+                    ["Messaging:OsEventsQueueUrl"] = osQueue
+                }).Build();
+            var billing = new Billing.BillingRepository(dynamo, billingSettings);
+            var budget = Billing.Budget.Create(order.Id, 1, order.BranchId,
+                [new Billing.BudgetLine(part.Id, part.Name, requested, 1000)]);
+            await billing.CreateAsync(budget, CancellationToken.None);
+            await billing.DecideAsync(order.Id, 1, true, CancellationToken.None);
+            foreach (var item in await billing.GetPendingOutboxAsync(CancellationToken.None))
+                await billing.MarkOutboxPublishedAsync(item.EventId, CancellationToken.None);
+            var payment = new Billing.PaymentRequest(pendingOrder.PaymentAttemptId!.Value,
+                order.Id, budget.Id, 1, order.BranchId, requested * 1000L, DateTime.UtcNow);
+            await billing.RecordPaymentRequestAsync(Guid.NewGuid(), payment, CancellationToken.None);
+            await billing.CompletePaymentCreationAsync(payment.Id,
+                new Billing.MercadoPagoQrOrder("ORDTEST123", "qr-test", "created"),
+                CancellationToken.None);
+            var amount = (requested * 10m).ToString("F2",
+                System.Globalization.CultureInfo.InvariantCulture);
+            using var providerHttp = new HttpClient(new StubHandler(request =>
+            {
+                Assert.Equal(HttpMethod.Get, request.Method);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new
+                    {
+                        id = "ORDTEST123", external_reference = $"pay_{payment.Id:N}",
+                        status = rejectionReason, currency = "BRL", total_amount = amount,
+                        transactions = new { payments = new[] { new { status = rejectionReason } } }
+                    }), Encoding.UTF8, "application/json")
+                };
+            })) { BaseAddress = new Uri("https://api.mercadopago.com/") };
+            var reconciler = new Billing.PaymentReconciliationService(billing,
+                new Billing.MercadoPagoQrClient(providerHttp,
+                    new Billing.MercadoPagoQrOptions("test-token", "test-pos")));
+            Assert.True(await reconciler.ReconcileAsync("ORDTEST123", CancellationToken.None));
+            Assert.Equal("Rejected", (await billing.GetPaymentAttemptAsync(payment.Id,
+                CancellationToken.None))!.Status);
+            using var billingServices = new ServiceCollection()
+                .AddScoped(_ => new Billing.BillingRepository(dynamo, billingSettings))
+                .BuildServiceProvider();
+            using var billingOutbox = new Billing.BillingOutboxWorker(sqs,
+                billingServices.GetRequiredService<IServiceScopeFactory>(), billingSettings,
+                NullLogger<Billing.BillingOutboxWorker>.Instance);
+            await billingOutbox.StartAsync(CancellationToken.None);
             using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
             {
                 while (state == WorkOrderProcessState.AwaitingPayment && !timeout.IsCancellationRequested)
@@ -241,6 +297,7 @@ public sealed class StockReservationFlowTests
                     if (state == WorkOrderProcessState.ReleasingStock) await Task.Delay(100);
                 }
             }
+            await billingOutbox.StopAsync(CancellationToken.None);
             }
         }
         await commandsWorker.StopAsync(CancellationToken.None);
@@ -261,6 +318,13 @@ public sealed class StockReservationFlowTests
             await finalExecution.InboxMessages.CountAsync());
         Assert.Equal(paid ? 3 : expectedState == WorkOrderProcessState.AwaitingPayment ? 2 : 1,
             await finalExecution.OutboxMessages.CountAsync());
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken) => Task.FromResult(respond(request));
     }
 }
 

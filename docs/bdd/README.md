@@ -5,7 +5,7 @@ Os cenários em [saga-fase4.feature](saga-fase4.feature) descrevem comportamento
 | Cenário | Testes executáveis existentes | Situação |
 |---|---|---|
 | Orçamento aprovado → reserva → pedido de pagamento | `OpenedEventFlowTests.OutboxRoundTripCreatesBudgetAndMovesOrderToApproval`; `StockReservationFlowTests.ReservationResultUpdatesOrderWithoutOverselling` | Coberto em segmentos; cenário único completo pendente |
-| Pagamento `expired`/`canceled` → liberação | `PaymentRejectionTransactionTests.TerminalUnpaidOrderPublishesOneRejection`; `StockReservationFlowTests.ReservationResultUpdatesOrderWithoutOverselling` (ambos os motivos atravessam as filas OS/Execução) | Coberto em segmentos; cenário único Billing→OS→Execução pendente |
+| Pagamento `expired`/`canceled` → liberação | `StockReservationFlowTests.ReservationResultUpdatesOrderWithoutOverselling` (Billing consulta order simulada, publica via ElasticMQ; OS/Execução liberam estoque e concluem) | Coberto de Billing até Execução/OS |
 | Recusa após pagamento → revisão administrativa | `ExecutionRejectionTests.RejectionMovesPaidOrderToManualReviewWithoutFinalizing` | Coberto |
 | Pedido → estorno confirmado → OS cancelada | `RefundFlowTests.RefundRequestCrossesQueuesAndConfirmationCancelsOrder`; `RefundOrderProcessorTests.RefundIsConfirmedOnlyByGetAndDoesNotRepeatAmbiguousPost` | Coberto com provedor simulado |
 | POST ambíguo → sem repetição → reconciliação | `RefundOrderProcessorTests.RefundIsConfirmedOnlyByGetAndDoesNotRepeatAmbiguousPost`; `RefundReconciliationHttpTests.InternalRouteRequiresTokenAndConfirmsRefundWithGetOnly` | Coberto com provedor simulado |
@@ -20,4 +20,4 @@ $env:BILLING_DYNAMO_ENDPOINT='http://localhost:8000'
 .\.dotnet_home\sdk10\dotnet.exe test tests/OficinaMvp.Integration.Tests --no-restore
 ```
 
-Antes de marcar BDD como completo, executar também os dois cenários hoje cobertos apenas em segmentos, validar duplicatas e falhas pelas filas e gerar evidência de execução no CI. Testes com Mercado Pago real dependem de credenciais de testes.
+Antes de marcar BDD como completo, unir abertura/aprovação/reserva/pagamento/execução em um cenário único, validar duplicatas e falhas pelas filas e gerar evidência de execução no CI. Testes com Mercado Pago real dependem de credenciais de testes.
