@@ -26,6 +26,23 @@ builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<IBudgetEventStore>(provider => provider.GetRequiredService<BillingRepository>());
 builder.Services.AddScoped<WorkOrderOpenedHandler>();
 builder.Services.AddScoped<PaymentRequestHandler>();
+var mercadoPagoToken = builder.Configuration["MercadoPago:AccessToken"];
+var mercadoPagoPos = builder.Configuration["MercadoPago:ExternalPosId"];
+if (!string.IsNullOrWhiteSpace(mercadoPagoToken) || !string.IsNullOrWhiteSpace(mercadoPagoPos))
+{
+    if (string.IsNullOrWhiteSpace(mercadoPagoToken) || string.IsNullOrWhiteSpace(mercadoPagoPos))
+        throw new InvalidOperationException("MercadoPago:AccessToken e ExternalPosId devem ser configurados juntos.");
+    builder.Services.AddHttpClient("mercadopago", client =>
+    {
+        client.BaseAddress = new Uri("https://api.mercadopago.com/");
+        client.Timeout = TimeSpan.FromSeconds(15);
+    });
+    builder.Services.AddScoped(provider => new MercadoPagoQrClient(
+        provider.GetRequiredService<IHttpClientFactory>().CreateClient("mercadopago"),
+        new MercadoPagoQrOptions(mercadoPagoToken, mercadoPagoPos)));
+    builder.Services.AddScoped<PaymentOrderProcessor>();
+    builder.Services.AddHostedService<PaymentOrderWorker>();
+}
 var workOrdersQueueUrl = builder.Configuration["Messaging:WorkOrdersQueueUrl"];
 var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];
 if (!string.IsNullOrWhiteSpace(workOrdersQueueUrl) || !string.IsNullOrWhiteSpace(osEventsQueueUrl))
@@ -110,6 +127,12 @@ internalApi.MapPost("/budgets/{workOrderId:guid}/{version:int}/decision", async 
         return budget is null ? Results.NotFound() : Results.Ok(budget);
     }
     catch (InvalidOperationException error) { return Results.Conflict(new { error = error.Message }); }
+});
+internalApi.MapGet("/payments/{paymentAttemptId:guid}", async (Guid paymentAttemptId,
+    BillingRepository repository, CancellationToken ct) =>
+{
+    var payment = await repository.GetPaymentAttemptAsync(paymentAttemptId, ct);
+    return payment is null ? Results.NotFound() : Results.Ok(payment);
 });
 
 app.Run();

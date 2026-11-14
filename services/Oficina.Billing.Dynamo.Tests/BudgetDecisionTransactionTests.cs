@@ -1,8 +1,11 @@
 using System.Text.Json;
+using System.Net;
+using System.Text;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
 using Amazon.Runtime;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Oficina.Billing;
 using Xunit;
 
@@ -67,6 +70,50 @@ public sealed class BudgetDecisionTransactionTests
             var saved = await repository.GetPaymentRequestAsync(paymentAttemptId, CancellationToken.None);
             Assert.Equal(budget.TotalCents, saved!.TotalCents);
             Assert.Equal(budget.Id, saved.BudgetId);
+            var calls = 0;
+            using var http = new HttpClient(new StubHandler(request =>
+            {
+                calls++;
+                Assert.Equal(paymentAttemptId.ToString("D"),
+                    request.Headers.GetValues("X-Idempotency-Key").Single());
+                return Task.FromResult(calls == 1
+                    ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    : new HttpResponseMessage(HttpStatusCode.Created)
+                    {
+                        Content = new StringContent(JsonSerializer.Serialize(new
+                        {
+                            id = "ORDTEST", status = "created",
+                            external_reference = $"pay_{paymentAttemptId:N}",
+                            total_amount = "125.00", type_response = new { qr_data = "qr-test" }
+                        }), Encoding.UTF8, "application/json")
+                    });
+            })) { BaseAddress = new Uri("https://api.mercadopago.com/") };
+            var processor = new PaymentOrderProcessor(repository,
+                new MercadoPagoQrClient(http, new MercadoPagoQrOptions("test-token", "test-pos")),
+                NullLogger<PaymentOrderProcessor>.Instance);
+            Assert.Equal(0, await processor.ProcessBatchAsync(CancellationToken.None));
+            Assert.Single(await repository.GetPendingPaymentsAsync(CancellationToken.None));
+            Assert.Equal(1, await processor.ProcessBatchAsync(CancellationToken.None));
+            Assert.Equal(0, await processor.ProcessBatchAsync(CancellationToken.None));
+            Assert.Equal(2, calls);
+            Assert.Empty(await repository.GetPendingPaymentsAsync(CancellationToken.None));
+            var created = await repository.GetPaymentAttemptAsync(paymentAttemptId, CancellationToken.None);
+            Assert.Equal("Created", created!.Status);
+            Assert.Equal("ORDTEST", created.ProviderOrderId);
+            Assert.Equal("qr-test", created.QrData);
+            var oldAttemptId = Guid.NewGuid();
+            var oldEvent = paymentEvent with
+            {
+                EventId = Guid.NewGuid(), OccurredAtUtc = DateTime.UtcNow.AddHours(-24),
+                Payload = paymentEvent.Payload with { PaymentAttemptId = oldAttemptId }
+            };
+            Assert.True(await paymentHandler.HandleAsync(JsonSerializer.Serialize(oldEvent,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)), CancellationToken.None));
+            Assert.Equal(0, await processor.ProcessBatchAsync(CancellationToken.None));
+            Assert.Equal("ManualReview",
+                (await repository.GetPaymentAttemptAsync(oldAttemptId, CancellationToken.None))!.Status);
+            Assert.Equal(2, calls);
+            Assert.Empty(await repository.GetPendingPaymentsAsync(CancellationToken.None));
             var tampered = paymentEvent with
             {
                 EventId = Guid.NewGuid(),
@@ -82,5 +129,12 @@ public sealed class BudgetDecisionTransactionTests
                 paymentHandler.HandleAsync(paymentBody, CancellationToken.None));
             Assert.Null(await repository.GetPaymentRequestAsync(paymentAttemptId, CancellationToken.None));
         }
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken) => send(request);
     }
 }

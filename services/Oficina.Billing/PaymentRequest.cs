@@ -11,6 +11,7 @@ public sealed record CreatePaymentRequestedEnvelope(Guid EventId, string EventTy
     DateTime OccurredAtUtc, CreatePaymentRequestedPayload Payload);
 public sealed record PaymentRequest(Guid Id, Guid WorkOrderId, Guid BudgetId, int BudgetVersion,
     string? BranchId, long TotalCents, DateTime RequestedAtUtc);
+public sealed record PaymentAttempt(Guid Id, string Status, string? ProviderOrderId, string? QrData);
 
 public sealed class PaymentRequestHandler(BillingRepository repository)
 {

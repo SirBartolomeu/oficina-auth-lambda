@@ -147,6 +147,8 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         paymentKey["totalCents"] = new AttributeValue { N = payment.TotalCents.ToString() };
         paymentKey["status"] = new AttributeValue { S = "Requested" };
         paymentKey["requestedAtUtc"] = new AttributeValue { S = payment.RequestedAtUtc.ToString("O") };
+        var pending = PendingPaymentKey(payment.Id);
+        pending["requestedAtUtc"] = new AttributeValue { S = payment.RequestedAtUtc.ToString("O") };
         var inbox = InboxKey(eventId);
         inbox["receivedAtUtc"] = new AttributeValue { S = DateTime.UtcNow.ToString("O") };
         try
@@ -163,6 +165,11 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
                     new TransactWriteItem { Put = new Put
                     {
                         TableName = _table, Item = inbox,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = pending,
                         ConditionExpression = "attribute_not_exists(pk)"
                     } }
                 ]
@@ -198,6 +205,105 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             string.IsNullOrEmpty(item["branchId"].S) ? null : item["branchId"].S,
             long.Parse(item["totalCents"].N), DateTime.Parse(item["requestedAtUtc"].S,
                 null, System.Globalization.DateTimeStyles.RoundtripKind));
+    }
+
+    public async Task<IReadOnlyCollection<Guid>> GetPendingPaymentsAsync(CancellationToken cancellationToken)
+    {
+        var response = await dynamo.QueryAsync(new QueryRequest
+        {
+            TableName = _table,
+            KeyConditionExpression = "pk = :pk",
+            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+            {
+                [":pk"] = new() { S = "PAYMENT#PENDING" }
+            },
+            Limit = 10,
+            ConsistentRead = true
+        }, cancellationToken);
+        return (response.Items ?? []).Select(item => Guid.ParseExact(item["sk"].S, "N")).ToArray();
+    }
+
+    public async Task<PaymentAttempt?> GetPaymentAttemptAsync(Guid paymentAttemptId,
+        CancellationToken cancellationToken)
+    {
+        var response = await dynamo.GetItemAsync(new GetItemRequest
+        {
+            TableName = _table, Key = PaymentKey(paymentAttemptId), ConsistentRead = true
+        }, cancellationToken);
+        if (response.Item is not { Count: > 0 }) return null;
+        var item = response.Item;
+        return new PaymentAttempt(paymentAttemptId, item["status"].S,
+            item.TryGetValue("providerOrderId", out var id) ? id.S : null,
+            item.TryGetValue("qrData", out var qr) ? qr.S : null);
+    }
+
+    public async Task<bool> CompletePaymentCreationAsync(Guid paymentAttemptId,
+        MercadoPagoQrOrder order, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
+            {
+                TransactItems =
+                [
+                    new TransactWriteItem { Update = new Update
+                    {
+                        TableName = _table,
+                        Key = PaymentKey(paymentAttemptId),
+                        ConditionExpression = "#status = :requested",
+                        UpdateExpression = "SET #status = :created, providerOrderId = :orderId, qrData = :qrData",
+                        ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                        ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                        {
+                            [":requested"] = new() { S = "Requested" },
+                            [":created"] = new() { S = "Created" },
+                            [":orderId"] = new() { S = order.Id },
+                            [":qrData"] = new() { S = order.QrData }
+                        }
+                    } },
+                    new TransactWriteItem { Delete = new Delete
+                    {
+                        TableName = _table, Key = PendingPaymentKey(paymentAttemptId),
+                        ConditionExpression = "attribute_exists(pk)"
+                    } }
+                ]
+            }, cancellationToken);
+            return true;
+        }
+        catch (TransactionCanceledException)
+        {
+            var current = await GetPaymentAttemptAsync(paymentAttemptId, cancellationToken);
+            if (current?.Status == "Created" && current.ProviderOrderId == order.Id)
+                return false;
+            throw new InvalidOperationException("Conflito ao concluir a criação da order.");
+        }
+    }
+
+    public async Task MarkPaymentManualReviewAsync(Guid paymentAttemptId, CancellationToken cancellationToken)
+    {
+        await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
+        {
+            TransactItems =
+            [
+                new TransactWriteItem { Update = new Update
+                {
+                    TableName = _table, Key = PaymentKey(paymentAttemptId),
+                    ConditionExpression = "#status = :requested",
+                    UpdateExpression = "SET #status = :review",
+                    ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                    ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                    {
+                        [":requested"] = new() { S = "Requested" },
+                        [":review"] = new() { S = "ManualReview" }
+                    }
+                } },
+                new TransactWriteItem { Delete = new Delete
+                {
+                    TableName = _table, Key = PendingPaymentKey(paymentAttemptId),
+                    ConditionExpression = "attribute_exists(pk)"
+                } }
+            ]
+        }, cancellationToken);
     }
 
     public async Task<Budget?> DecideAsync(Guid workOrderId, int version, bool approved, CancellationToken cancellationToken)
@@ -274,6 +380,12 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
     {
         ["pk"] = new() { S = $"PAYMENT#{paymentAttemptId:N}" },
         ["sk"] = new() { S = "REQUEST" }
+    };
+
+    private static Dictionary<string, AttributeValue> PendingPaymentKey(Guid paymentAttemptId) => new()
+    {
+        ["pk"] = new() { S = "PAYMENT#PENDING" },
+        ["sk"] = new() { S = paymentAttemptId.ToString("N") }
     };
 
     private static Dictionary<string, AttributeValue> OutboxKey(Guid eventId) => new()
