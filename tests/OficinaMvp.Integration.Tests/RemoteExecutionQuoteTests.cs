@@ -110,12 +110,30 @@ public sealed class RemoteExecutionQuoteTests
         var updated = await client.GetFromJsonAsync<JsonElement>($"/api/work-orders/{orderId}");
         Assert.Equal("AwaitingApproval", updated.GetProperty("status").GetString());
 
+        var paymentEvent = new IntegrationEnvelope<PaymentConfirmedPayload>(Guid.NewGuid(),
+            "PaymentConfirmed", 1, orderId, paymentCommand.EventId, orderId, null,
+            DateTime.UtcNow, new PaymentConfirmedPayload(
+                (await resultDb.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId))
+                    .PaymentAttemptId!.Value, "ORDTEST123", 19000, "BRL"));
+        var paymentBody = JsonSerializer.Serialize(paymentEvent,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using (var paymentScope = factory.Services.CreateScope())
+        {
+            var paymentDb = paymentScope.ServiceProvider.GetRequiredService<WorkshopDbContext>();
+            var paymentHandler = new PaymentConfirmedHandler(paymentDb);
+            Assert.True(await paymentHandler.HandleAsync(paymentBody, CancellationToken.None));
+            Assert.False(await paymentHandler.HandleAsync(paymentBody, CancellationToken.None));
+            Assert.Equal(WorkOrderProcessState.ReadyForExecution,
+                (await paymentDb.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId))
+                    .ProcessState);
+        }
+
         var invalid = ready with { EventId = Guid.NewGuid(),
             Payload = new BudgetReadyPayload(budgetId, 1, 9999, "BRL") };
         await Assert.ThrowsAsync<DomainException>(() => handler.HandleAsync(
             JsonSerializer.Serialize(invalid, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             CancellationToken.None));
-        Assert.Equal(3, await resultDb.InboxMessages.AsNoTracking().CountAsync());
+        Assert.Equal(4, await resultDb.InboxMessages.AsNoTracking().CountAsync());
     }
 
     [Fact]

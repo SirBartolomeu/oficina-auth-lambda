@@ -36,6 +36,9 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                         else if (eventType is "StockReserved" or "StockReservationRejected")
                             await scope.ServiceProvider.GetRequiredService<StockReservationResultHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType == "PaymentConfirmed")
+                            await scope.ServiceProvider.GetRequiredService<PaymentConfirmedHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
                         else
                             throw new InvalidOperationException($"Evento não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);

@@ -1,0 +1,7 @@
+namespace Oficina.Billing;
+
+public sealed record PaymentConfirmedPayload(Guid PaymentAttemptId, string ProviderOrderId,
+    long TotalCents, string Currency);
+public sealed record PaymentConfirmedEnvelope(Guid EventId, string EventType, int SchemaVersion,
+    Guid CorrelationId, Guid CausationId, Guid WorkOrderId, string? BranchId,
+    DateTime OccurredAtUtc, PaymentConfirmedPayload Payload);

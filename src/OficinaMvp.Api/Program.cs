@@ -80,6 +80,7 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
         builder.Services.AddScoped<BudgetReadyHandler>();
         builder.Services.AddScoped<BudgetDecisionHandler>();
         builder.Services.AddScoped<StockReservationResultHandler>();
+        builder.Services.AddScoped<PaymentConfirmedHandler>();
         builder.Services.AddHostedService<OsEventsSqsWorker>();
     }
 }

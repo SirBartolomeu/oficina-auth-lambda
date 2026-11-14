@@ -71,8 +71,22 @@ public sealed class BudgetDecisionTransactionTests
             Assert.Equal(budget.TotalCents, saved!.TotalCents);
             Assert.Equal(budget.Id, saved.BudgetId);
             var calls = 0;
+            var queriedTotal = "125.01";
             using var http = new HttpClient(new StubHandler(request =>
             {
+                if (request.Method == HttpMethod.Get)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(JsonSerializer.Serialize(new
+                        {
+                            id = "ORDTEST", external_reference = $"pay_{paymentAttemptId:N}",
+                            status = "processed", currency = "BRL", total_amount = queriedTotal,
+                            transactions = new { payments = new[]
+                            {
+                                new { status = "processed", paid_amount = "125.00" }
+                            } }
+                        }), Encoding.UTF8, "application/json")
+                    });
                 calls++;
                 Assert.Equal(paymentAttemptId.ToString("D"),
                     request.Headers.GetValues("X-Idempotency-Key").Single());
@@ -101,6 +115,24 @@ public sealed class BudgetDecisionTransactionTests
             Assert.Equal("Created", created!.Status);
             Assert.Equal("ORDTEST", created.ProviderOrderId);
             Assert.Equal("qr-test", created.QrData);
+            var reconciler = new PaymentReconciliationService(repository,
+                new MercadoPagoQrClient(http, new MercadoPagoQrOptions("test-token", "test-pos")));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                reconciler.ReconcileAsync("ORDTEST", CancellationToken.None));
+            Assert.Equal("Created",
+                (await repository.GetPaymentAttemptAsync(paymentAttemptId, CancellationToken.None))!.Status);
+            Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
+            queriedTotal = "125.00";
+            Assert.True(await reconciler.ReconcileAsync("ORDTEST", CancellationToken.None));
+            Assert.False(await reconciler.ReconcileAsync("ORDTEST", CancellationToken.None));
+            Assert.Equal("Confirmed",
+                (await repository.GetPaymentAttemptAsync(paymentAttemptId, CancellationToken.None))!.Status);
+            var confirmed = (await repository.GetPendingOutboxAsync(CancellationToken.None))
+                .Select(item => JsonDocument.Parse(item.Body))
+                .Single(item => item.RootElement.GetProperty("eventType").GetString() == "PaymentConfirmed");
+            Assert.Equal(paymentAttemptId,
+                confirmed.RootElement.GetProperty("payload").GetProperty("paymentAttemptId").GetGuid());
+            confirmed.Dispose();
             var oldAttemptId = Guid.NewGuid();
             var oldEvent = paymentEvent with
             {

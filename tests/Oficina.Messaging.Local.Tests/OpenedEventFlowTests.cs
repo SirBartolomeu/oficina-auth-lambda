@@ -106,6 +106,7 @@ public sealed class OpenedEventFlowTests
             .AddScoped(_ => new WorkshopDbContext(dbOptions))
             .AddScoped<BudgetReadyHandler>()
             .AddScoped<BudgetDecisionHandler>()
+            .AddScoped<PaymentConfirmedHandler>()
             .BuildServiceProvider();
         using var billingOutbox = new BillingOutboxWorker(sqs,
             services.GetRequiredService<IServiceScopeFactory>(), settings,
@@ -152,8 +153,6 @@ public sealed class OpenedEventFlowTests
                     await Task.Delay(100);
             }
         }
-        await billingOutbox.StopAsync(CancellationToken.None);
-        await osWorker.StopAsync(CancellationToken.None);
         await using var decisionDb = new WorkshopDbContext(dbOptions);
         Assert.False(await new BudgetDecisionHandler(decisionDb).HandleAsync(decision.Body, CancellationToken.None));
         var decidedOrder = await decisionDb.WorkOrders.SingleAsync(item => item.Id == orderId);
@@ -198,6 +197,26 @@ public sealed class OpenedEventFlowTests
         Assert.NotNull(payment);
         Assert.Equal(12500, payment.TotalCents);
         Assert.Equal(budget.Id, payment.BudgetId);
+        Assert.True(await repository.CompletePaymentCreationAsync(paymentAttemptId,
+            new MercadoPagoQrOrder("ORDTEST123", "qr-test", "created"), CancellationToken.None));
+        Assert.True(await repository.ConfirmPaymentAsync(payment, "ORDTEST123", CancellationToken.None));
+        Assert.False(await repository.ConfirmPaymentAsync(payment, "ORDTEST123", CancellationToken.None));
+        WorkOrderProcessState paymentState = WorkOrderProcessState.AwaitingPayment;
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            while (paymentState == WorkOrderProcessState.AwaitingPayment && !timeout.IsCancellationRequested)
+            {
+                await using var verify = new WorkshopDbContext(dbOptions);
+                paymentState = (await verify.WorkOrders.SingleAsync(item => item.Id == orderId)).ProcessState;
+                if (paymentState == WorkOrderProcessState.AwaitingPayment)
+                    await Task.Delay(100);
+            }
+        }
+        await billingOutbox.StopAsync(CancellationToken.None);
+        await osWorker.StopAsync(CancellationToken.None);
+        Assert.Equal(WorkOrderProcessState.ReadyForExecution, paymentState);
+        await using var paymentDb = new WorkshopDbContext(dbOptions);
+        Assert.Equal(4, await paymentDb.InboxMessages.CountAsync());
     }
 
 }

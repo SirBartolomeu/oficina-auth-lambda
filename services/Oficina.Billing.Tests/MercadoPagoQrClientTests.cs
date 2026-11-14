@@ -47,6 +47,36 @@ public sealed class MercadoPagoQrClientTests
         Assert.Equal("qr-test-data", order.QrData);
     }
 
+    [Fact]
+    public async Task GetReadsProviderStatusAndPaidAmount()
+    {
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("/v1/orders/ORDTEST123", request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    id = "ORDTEST123", external_reference = "pay_123", status = "processed",
+                    currency = "BRL", total_amount = "125.45",
+                    transactions = new { payments = new[]
+                    {
+                        new { status = "processed", paid_amount = "125.45" }
+                    } }
+                }), Encoding.UTF8, "application/json")
+            });
+        })) { BaseAddress = new Uri("https://api.mercadopago.com/") };
+        var client = new MercadoPagoQrClient(http, new MercadoPagoQrOptions("test-token", "test-pos"));
+
+        var order = await client.GetAsync("ORDTEST123", CancellationToken.None);
+
+        Assert.Equal(12545, order.TotalCents);
+        Assert.Equal(12545, order.PaidCents);
+        Assert.Equal("processed", order.Status);
+        Assert.Equal("processed", order.PaymentStatus);
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,

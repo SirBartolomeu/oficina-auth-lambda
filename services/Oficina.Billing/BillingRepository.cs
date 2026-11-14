@@ -306,6 +306,81 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         }, cancellationToken);
     }
 
+    public async Task<bool> ConfirmPaymentAsync(PaymentRequest payment, string providerOrderId,
+        CancellationToken cancellationToken)
+    {
+        var eventId = Guid.NewGuid();
+        var occurredAt = DateTime.UtcNow;
+        var confirmation = new PaymentConfirmedEnvelope(eventId, "PaymentConfirmed", 1,
+            payment.WorkOrderId, Guid.NewGuid(), payment.WorkOrderId, payment.BranchId,
+            occurredAt, new PaymentConfirmedPayload(payment.Id, providerOrderId,
+                payment.TotalCents, "BRL"));
+        var outbox = OutboxKey(eventId);
+        outbox["body"] = new AttributeValue { S = JsonSerializer.Serialize(confirmation,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outbox["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
+        try
+        {
+            await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
+            {
+                TransactItems =
+                [
+                    new TransactWriteItem { Update = new Update
+                    {
+                        TableName = _table, Key = PaymentKey(payment.Id),
+                        ConditionExpression = "#status = :created AND providerOrderId = :providerOrderId",
+                        UpdateExpression = "SET #status = :confirmed",
+                        ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                        ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                        {
+                            [":created"] = new() { S = "Created" },
+                            [":confirmed"] = new() { S = "Confirmed" },
+                            [":providerOrderId"] = new() { S = providerOrderId }
+                        }
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = outbox,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } }
+                ]
+            }, cancellationToken);
+            return true;
+        }
+        catch (TransactionCanceledException)
+        {
+            var current = await GetPaymentAttemptAsync(payment.Id, cancellationToken);
+            if (current?.Status == "Confirmed" && current.ProviderOrderId == providerOrderId)
+                return false;
+            throw new InvalidOperationException("Conflito ao confirmar pagamento.");
+        }
+    }
+
+    public async Task MarkCreatedPaymentManualReviewAsync(Guid paymentAttemptId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await dynamo.UpdateItemAsync(new UpdateItemRequest
+            {
+                TableName = _table, Key = PaymentKey(paymentAttemptId),
+                ConditionExpression = "#status = :created",
+                UpdateExpression = "SET #status = :review",
+                ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                {
+                    [":created"] = new() { S = "Created" },
+                    [":review"] = new() { S = "ManualReview" }
+                }
+            }, cancellationToken);
+        }
+        catch (ConditionalCheckFailedException)
+        {
+            var current = await GetPaymentAttemptAsync(paymentAttemptId, cancellationToken);
+            if (current?.Status != "ManualReview") throw;
+        }
+    }
+
     public async Task<Budget?> DecideAsync(Guid workOrderId, int version, bool approved, CancellationToken cancellationToken)
     {
         var existing = await GetAsync(workOrderId, version, cancellationToken);

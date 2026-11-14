@@ -6,6 +6,7 @@ using Amazon.SQS;
 using Oficina.Billing;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 var internalToken = builder.Configuration["InternalToken"];
@@ -28,6 +29,7 @@ builder.Services.AddScoped<WorkOrderOpenedHandler>();
 builder.Services.AddScoped<PaymentRequestHandler>();
 var mercadoPagoToken = builder.Configuration["MercadoPago:AccessToken"];
 var mercadoPagoPos = builder.Configuration["MercadoPago:ExternalPosId"];
+var mercadoPagoWebhookSecret = builder.Configuration["MercadoPago:WebhookSecret"];
 if (!string.IsNullOrWhiteSpace(mercadoPagoToken) || !string.IsNullOrWhiteSpace(mercadoPagoPos))
 {
     if (string.IsNullOrWhiteSpace(mercadoPagoToken) || string.IsNullOrWhiteSpace(mercadoPagoPos))
@@ -41,6 +43,7 @@ if (!string.IsNullOrWhiteSpace(mercadoPagoToken) || !string.IsNullOrWhiteSpace(m
         provider.GetRequiredService<IHttpClientFactory>().CreateClient("mercadopago"),
         new MercadoPagoQrOptions(mercadoPagoToken, mercadoPagoPos)));
     builder.Services.AddScoped<PaymentOrderProcessor>();
+    builder.Services.AddScoped<PaymentReconciliationService>();
     builder.Services.AddHostedService<PaymentOrderWorker>();
 }
 var workOrdersQueueUrl = builder.Configuration["Messaging:WorkOrdersQueueUrl"];
@@ -134,6 +137,26 @@ internalApi.MapGet("/payments/{paymentAttemptId:guid}", async (Guid paymentAttem
     var payment = await repository.GetPaymentAttemptAsync(paymentAttemptId, ct);
     return payment is null ? Results.NotFound() : Results.Ok(payment);
 });
+if (!string.IsNullOrWhiteSpace(mercadoPagoToken) &&
+    !string.IsNullOrWhiteSpace(mercadoPagoWebhookSecret))
+{
+    app.MapPost("/webhooks/mercado-pago/orders", async (HttpRequest request,
+        PaymentReconciliationService reconciliation, CancellationToken ct) =>
+    {
+        var orderId = request.Query["data.id"].ToString();
+        if (!MercadoPagoWebhookSignature.IsValid(request.Headers["x-signature"],
+            request.Headers["x-request-id"], orderId, mercadoPagoWebhookSecret))
+            return Results.Unauthorized();
+        using var notification = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+        var root = notification.RootElement;
+        if (!root.TryGetProperty("type", out var type) || type.GetString() != "order" ||
+            !root.TryGetProperty("data", out var data) ||
+            !data.TryGetProperty("id", out var id) || id.GetString() != orderId)
+            return Results.BadRequest();
+        await reconciliation.ReconcileAsync(orderId, ct);
+        return Results.Ok();
+    });
+}
 
 app.Run();
 
