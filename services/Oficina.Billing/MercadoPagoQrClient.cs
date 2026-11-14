@@ -9,6 +9,7 @@ public sealed record MercadoPagoQrOptions(string AccessToken, string ExternalPos
 public sealed record MercadoPagoQrOrder(string Id, string QrData, string Status);
 public sealed record MercadoPagoOrderStatus(string Id, string ExternalReference, string Status,
     string Currency, long TotalCents, long PaidCents, string? PaymentStatus);
+public sealed record MercadoPagoRefundSubmission(string OrderId, string Status);
 
 public sealed class MercadoPagoQrClient(HttpClient http, MercadoPagoQrOptions options)
 {
@@ -58,10 +59,7 @@ public sealed class MercadoPagoQrClient(HttpClient http, MercadoPagoQrOptions op
 
     public async Task<MercadoPagoOrderStatus> GetAsync(string orderId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(orderId) || orderId.Length > 64 ||
-            !orderId.StartsWith("ORD", StringComparison.Ordinal) ||
-            orderId.Any(ch => !char.IsLetterOrDigit(ch)))
-            throw new ArgumentException("Identificador da order inválido.");
+        ValidateOrderId(orderId);
         using var request = new HttpRequestMessage(HttpMethod.Get,
             $"v1/orders/{Uri.EscapeDataString(orderId)}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.AccessToken);
@@ -87,6 +85,38 @@ public sealed class MercadoPagoQrClient(HttpClient http, MercadoPagoQrOptions op
             ? ParseCents(paid.GetString()) : 0;
         return new MercadoPagoOrderStatus(returnedId, reference, status, currency,
             total, paidCents, paymentStatus);
+    }
+
+    public async Task<MercadoPagoRefundSubmission> RequestRefundAsync(string orderId,
+        Guid refundRequestId, CancellationToken cancellationToken)
+    {
+        ValidateOrderId(orderId);
+        if (refundRequestId == Guid.Empty)
+            throw new ArgumentException("Identificador do pedido de estorno inválido.");
+        if (string.IsNullOrWhiteSpace(options.AccessToken))
+            throw new InvalidOperationException("Access Token Mercado Pago é obrigatório.");
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"v1/orders/{Uri.EscapeDataString(orderId)}/refund");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.AccessToken);
+        request.Headers.TryAddWithoutValidation("X-Idempotency-Key", refundRequestId.ToString("D"));
+        using var response = await http.SendAsync(request, cancellationToken);
+        if (response.StatusCode != System.Net.HttpStatusCode.Created)
+            throw new HttpRequestException("Mercado Pago não aceitou o pedido de estorno.",
+                null, response.StatusCode);
+        using var result = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
+        var returnedId = result.RootElement.GetProperty("id").GetString();
+        var status = result.RootElement.GetProperty("status").GetString();
+        if (returnedId != orderId || string.IsNullOrWhiteSpace(status))
+            throw new InvalidOperationException("Resposta do estorno não corresponde à order.");
+        return new MercadoPagoRefundSubmission(returnedId, status);
+    }
+
+    private static void ValidateOrderId(string orderId)
+    {
+        if (string.IsNullOrWhiteSpace(orderId) || orderId.Length > 64 ||
+            !orderId.StartsWith("ORD", StringComparison.Ordinal) ||
+            orderId.Any(ch => !char.IsLetterOrDigit(ch)))
+            throw new ArgumentException("Identificador da order inválido.");
     }
 
     private static long ParseCents(string? value)

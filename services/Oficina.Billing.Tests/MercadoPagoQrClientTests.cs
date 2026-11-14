@@ -77,6 +77,51 @@ public sealed class MercadoPagoQrClientTests
         Assert.Equal("processed", order.PaymentStatus);
     }
 
+    [Fact]
+    public async Task RefundUsesOrderEndpointAndStableIdempotencyWithoutAmountBody()
+    {
+        var requestId = Guid.NewGuid();
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/v1/orders/ORDTEST123/refund", request.RequestUri!.AbsolutePath);
+            Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            Assert.Equal("test-token", request.Headers.Authorization?.Parameter);
+            Assert.Equal(requestId.ToString("D"),
+                request.Headers.GetValues("X-Idempotency-Key").Single());
+            Assert.Null(request.Content);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent("{\"id\":\"ORDTEST123\",\"status\":\"refunded\"}",
+                    Encoding.UTF8, "application/json")
+            });
+        })) { BaseAddress = new Uri("https://api.mercadopago.com/") };
+        var client = new MercadoPagoQrClient(http,
+            new MercadoPagoQrOptions("test-token", "test-pos"));
+
+        var submission = await client.RequestRefundAsync("ORDTEST123", requestId,
+            CancellationToken.None);
+
+        Assert.Equal("ORDTEST123", submission.OrderId);
+        Assert.Equal("refunded", submission.Status);
+    }
+
+    [Fact]
+    public async Task RefundRejectsResponseForAnotherOrder()
+    {
+        using var http = new HttpClient(new StubHandler(_ => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent("{\"id\":\"ORDOTHER\",\"status\":\"refunded\"}",
+                    Encoding.UTF8, "application/json")
+            }))) { BaseAddress = new Uri("https://api.mercadopago.com/") };
+        var client = new MercadoPagoQrClient(http,
+            new MercadoPagoQrOptions("test-token", "test-pos"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.RequestRefundAsync(
+            "ORDTEST123", Guid.NewGuid(), CancellationToken.None));
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
