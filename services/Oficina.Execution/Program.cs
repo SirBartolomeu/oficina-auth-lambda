@@ -118,6 +118,16 @@ internalApi.MapPost("/executions/{reservationId:guid}/finish", async (
         status = "Finished", published = finished.Value
     });
 });
+internalApi.MapPost("/executions/{reservationId:guid}/reject", async (
+    Guid reservationId, RejectRepairRequest request, ExecutionService service,
+    CancellationToken ct) =>
+{
+    var rejected = await service.RejectRepairAsync(reservationId, request.Reason, ct);
+    return rejected is null ? Results.NotFound() : Results.Ok(new
+    {
+        status = "Rejected", published = rejected.Value
+    });
+});
 internalApi.MapGet("/catalog/services", async (ExecutionDbContext db, CancellationToken ct) =>
     await db.RepairServices.AsNoTracking().OrderBy(item => item.Name).ToListAsync(ct));
 internalApi.MapGet("/catalog/parts", async (ExecutionDbContext db, CancellationToken ct) =>
@@ -148,4 +158,5 @@ app.Run();
 
 public sealed record RepairServiceRequest(string Name, string Description, decimal LaborPrice, int AverageDurationMinutes);
 public sealed record PartSupplyRequest(string Name, decimal UnitPrice, int StockQuantity);
+public sealed record RejectRepairRequest(string Reason);
 public partial class Program;

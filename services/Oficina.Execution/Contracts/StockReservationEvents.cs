@@ -16,3 +16,5 @@ public sealed record ExecutionStartedPayload(Guid ExecutionId, Guid ReservationI
     Guid PaymentAttemptId);
 public sealed record ExecutionFinishedPayload(Guid ExecutionId, Guid ReservationId,
     Guid PaymentAttemptId);
+public sealed record ExecutionRejectedPayload(Guid ExecutionId, Guid ReservationId,
+    Guid PaymentAttemptId, string Reason);

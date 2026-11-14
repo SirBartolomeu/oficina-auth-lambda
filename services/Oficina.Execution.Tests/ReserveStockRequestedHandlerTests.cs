@@ -159,4 +159,35 @@ public sealed class ReserveStockRequestedHandlerTests
             new JsonSerializerOptions(JsonSerializerDefaults.Web)), CancellationToken.None));
         Assert.Equal(2, await db.OutboxMessages.CountAsync());
     }
+
+    [Fact]
+    public async Task RejectedRepairPublishesOneEventAndCannotBeFinished()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ExecutionDbContext(
+            new DbContextOptionsBuilder<ExecutionDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var orderId = Guid.NewGuid();
+        var reservationId = Guid.NewGuid();
+        var service = new ExecutionService(db);
+        await service.ReserveAsync(new ReserveStockRequest(reservationId, orderId, []),
+            CancellationToken.None);
+        await service.ConsumeAsync(reservationId, CancellationToken.None);
+        var command = new IntegrationEnvelope<ExecutionRequestedPayload>(Guid.NewGuid(),
+            "ExecutionRequested", 1, orderId, Guid.NewGuid(), orderId, "sp-centro",
+            DateTime.UtcNow, new ExecutionRequestedPayload(orderId, reservationId, Guid.NewGuid()));
+        await new ExecutionRequestedHandler(db).HandleAsync(JsonSerializer.Serialize(command,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)), CancellationToken.None);
+
+        Assert.True(await service.RejectRepairAsync(reservationId, "Peça incompatível",
+            CancellationToken.None));
+        Assert.False(await service.RejectRepairAsync(reservationId, "Peça incompatível",
+            CancellationToken.None));
+        Assert.Equal(RepairStatus.Rejected, (await db.StockReservations.SingleAsync()).RepairStatus);
+        Assert.Equal("ExecutionRejected", (await db.OutboxMessages
+            .SingleAsync(item => item.EventType == "ExecutionRejected")).EventType);
+        await Assert.ThrowsAsync<OficinaMvp.Domain.Exceptions.DomainException>(() =>
+            service.FinishRepairAsync(reservationId, CancellationToken.None));
+    }
 }

@@ -33,7 +33,10 @@ public static class MappingExtensions
             workOrder.ApprovedAtUtc,
             workOrder.ExecutionStartedAtUtc,
             workOrder.FinalizedAtUtc,
-            workOrder.DeliveredAtUtc);
+            workOrder.DeliveredAtUtc)
+        {
+            ProcessState = workOrder.ProcessState
+        };
 
     public static WorkOrderDetailResponse ToDetailResponse(this WorkOrder workOrder) =>
         new(
@@ -71,7 +74,8 @@ public static class MappingExtensions
                     history.Note))
                 .ToList())
         {
-            BranchId = workOrder.BranchId
+            BranchId = workOrder.BranchId,
+            ProcessState = workOrder.ProcessState
         };
 
     public static ClientTrackingResponse ToClientTrackingResponse(this WorkOrder workOrder, string customerDocument) =>

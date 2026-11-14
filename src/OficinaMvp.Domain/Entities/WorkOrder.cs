@@ -180,6 +180,16 @@ public sealed class WorkOrder
         ChangeStatus(WorkOrderStatus.InExecution, changedAtUtc, "Pagamento confirmado. Serviço em execução.");
     }
 
+    public void RegisterExecutionRejection(DateTime changedAtUtc, string reason)
+    {
+        EnsureProcessState(WorkOrderProcessState.InExecution);
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new DomainException("Motivo da recusa do reparo obrigatório.");
+        ProcessState = WorkOrderProcessState.ManualReview;
+        RecordProcessNote(changedAtUtc,
+            $"Reparo recusado. Revisar estorno e compensação: {NormalizeOptional(reason)}");
+    }
+
     public void CancelBeforeExecution(DateTime changedAtUtc, string reason)
     {
         if (ProcessState is not WorkOrderProcessState.AwaitingStockReservation
@@ -209,6 +219,7 @@ public sealed class WorkOrder
     public void Finalize(DateTime changedAtUtc)
     {
         EnsureCurrentStatus(WorkOrderStatus.InExecution);
+        EnsureProcessState(WorkOrderProcessState.InExecution);
         FinalizedAtUtc = changedAtUtc;
         ProcessState = WorkOrderProcessState.Completed;
         ChangeStatus(WorkOrderStatus.Finalized, changedAtUtc, "Serviço finalizado.");

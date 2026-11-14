@@ -71,6 +71,7 @@ public sealed record WorkOrderDetailResponse(
     IReadOnlyCollection<WorkOrderStatusHistoryResponse> StatusHistory)
 {
     public string? BranchId { get; init; }
+    public WorkOrderProcessState ProcessState { get; init; }
 }
 
 public sealed record AverageExecutionTimeResponse(double AverageMinutes, int ProcessedOrders);
@@ -85,7 +86,10 @@ public sealed record WorkOrderStatusResponse(
     DateTime? ApprovedAtUtc,
     DateTime? ExecutionStartedAtUtc,
     DateTime? FinalizedAtUtc,
-    DateTime? DeliveredAtUtc);
+    DateTime? DeliveredAtUtc)
+{
+    public WorkOrderProcessState ProcessState { get; init; }
+}
 
 public sealed record BudgetDecisionRequest(
     bool Approved,

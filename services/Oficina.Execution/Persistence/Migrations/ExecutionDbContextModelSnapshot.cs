@@ -82,7 +82,14 @@ namespace Oficina.Execution.Persistence.Migrations
                     b.Property<Guid?>("PaymentAttemptId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(180)
+                        .HasColumnType("character varying(180)");
+
                     b.Property<DateTime?>("RepairFinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RepairRejectedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("RepairStartedAtUtc")

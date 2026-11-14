@@ -54,6 +54,7 @@ public sealed class ExecutionDbContext(DbContextOptions<ExecutionDbContext> opti
             entity.Property(item => item.RepairStatus).HasConversion<string>()
                 .HasMaxLength(24).IsConcurrencyToken();
             entity.Property(item => item.BranchId).HasMaxLength(64);
+            entity.Property(item => item.RejectionReason).HasMaxLength(180);
             entity.HasIndex(item => item.WorkOrderId);
             entity.HasMany(item => item.Lines).WithOne().HasForeignKey(item => item.ReservationId);
         });
@@ -68,7 +69,7 @@ public sealed class ExecutionDbContext(DbContextOptions<ExecutionDbContext> opti
 }
 
 public enum ReservationStatus { Reserved = 1, Released = 2, Consumed = 3 }
-public enum RepairStatus { Started = 1, Finished = 2 }
+public enum RepairStatus { Started = 1, Finished = 2, Rejected = 3 }
 
 public sealed class StockReservation
 {
@@ -89,6 +90,8 @@ public sealed class StockReservation
     public string? BranchId { get; private set; }
     public DateTime? RepairStartedAtUtc { get; private set; }
     public DateTime? RepairFinishedAtUtc { get; private set; }
+    public DateTime? RepairRejectedAtUtc { get; private set; }
+    public string? RejectionReason { get; private set; }
     public List<StockReservationLine> Lines { get; private set; } = [];
     public void Release() => Status = ReservationStatus.Released;
     public void Consume() => Status = ReservationStatus.Consumed;
@@ -115,6 +118,24 @@ public sealed class StockReservation
             throw new OficinaMvp.Domain.Exceptions.DomainException("Reparo ainda não iniciado.");
         RepairFinishedAtUtc = atUtc;
         RepairStatus = Oficina.Execution.Persistence.RepairStatus.Finished;
+        return true;
+    }
+    public bool RejectRepair(string reason, DateTime atUtc)
+    {
+        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 180)
+            throw new OficinaMvp.Domain.Exceptions.DomainException("Motivo da recusa inválido.");
+        if (RepairStatus == Oficina.Execution.Persistence.RepairStatus.Rejected)
+        {
+            if (RejectionReason == reason.Trim()) return false;
+            throw new OficinaMvp.Domain.Exceptions.DomainException(
+                "Reparo já recusado com outro motivo.");
+        }
+        if (RepairStatus != Oficina.Execution.Persistence.RepairStatus.Started)
+            throw new OficinaMvp.Domain.Exceptions.DomainException(
+                "Somente um reparo iniciado pode ser recusado.");
+        RejectionReason = reason.Trim();
+        RepairRejectedAtUtc = atUtc;
+        RepairStatus = Oficina.Execution.Persistence.RepairStatus.Rejected;
         return true;
     }
 }

@@ -129,6 +129,26 @@ public sealed class ExecutionService(ExecutionDbContext db)
         return true;
     }
 
+    public async Task<bool?> RejectRepairAsync(Guid reservationId, string reason,
+        CancellationToken cancellationToken)
+    {
+        var reservation = await db.StockReservations.SingleOrDefaultAsync(item =>
+            item.Id == reservationId, cancellationToken);
+        if (reservation is null) return null;
+        var occurredAt = DateTime.UtcNow;
+        if (!reservation.RejectRepair(reason, occurredAt)) return false;
+        var response = new IntegrationEnvelope<ExecutionRejectedPayload>(Guid.NewGuid(),
+            "ExecutionRejected", 1, reservation.WorkOrderId, Guid.NewGuid(),
+            reservation.WorkOrderId, reservation.BranchId, occurredAt,
+            new ExecutionRejectedPayload(reservation.WorkOrderId, reservation.Id,
+                reservation.PaymentAttemptId!.Value, reservation.RejectionReason!));
+        db.OutboxMessages.Add(new ExecutionOutboxMessage(response.EventId,
+            response.EventType, JsonSerializer.Serialize(response,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)), occurredAt));
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     private static Dictionary<Guid, int> Normalize(IReadOnlyCollection<CatalogItemRequest> items)
     {
         ArgumentNullException.ThrowIfNull(items);
