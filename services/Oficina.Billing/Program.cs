@@ -141,6 +141,27 @@ internalApi.MapGet("/payments/{paymentAttemptId:guid}", async (Guid paymentAttem
     var payment = await repository.GetPaymentAttemptAsync(paymentAttemptId, ct);
     return payment is null ? Results.NotFound() : Results.Ok(payment);
 });
+if (!string.IsNullOrWhiteSpace(mercadoPagoToken))
+{
+    internalApi.MapPost("/payments/{paymentAttemptId:guid}/reconcile-refund", async (
+        Guid paymentAttemptId, BillingRepository repository,
+        PaymentReconciliationService reconciliation, CancellationToken ct) =>
+    {
+        var attempt = await repository.GetPaymentAttemptAsync(paymentAttemptId, ct);
+        if (attempt is null) return Results.NotFound();
+        if (attempt.Status == "Refunded") return Results.Ok(new { attempt.Status, Reconciled = false });
+        if (attempt.Status is not "RefundRequested" and not "RefundSubmitting" ||
+            string.IsNullOrWhiteSpace(attempt.ProviderOrderId)) return Results.Conflict();
+        try
+        {
+            var reconciled = await reconciliation.ReconcileAsync(attempt.ProviderOrderId, ct);
+            var current = await repository.GetPaymentAttemptAsync(paymentAttemptId, ct);
+            return Results.Ok(new { Status = current!.Status, Reconciled = reconciled });
+        }
+        catch (HttpRequestException) { return Results.StatusCode(503); }
+        catch (InvalidOperationException) { return Results.Conflict(); }
+    });
+}
 if (!string.IsNullOrWhiteSpace(mercadoPagoToken) &&
     !string.IsNullOrWhiteSpace(mercadoPagoWebhookSecret))
 {

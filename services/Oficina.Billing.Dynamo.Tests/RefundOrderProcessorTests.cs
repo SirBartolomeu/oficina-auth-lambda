@@ -73,8 +73,9 @@ public sealed class RefundOrderProcessorTests
                 } }
             });
         })) { BaseAddress = new Uri("https://api.mercadopago.com/") };
-        var processor = new RefundOrderProcessor(repository,
-            new MercadoPagoQrClient(http, new MercadoPagoQrOptions("test-token", "test-pos")),
+        var client = new MercadoPagoQrClient(http,
+            new MercadoPagoQrOptions("test-token", "test-pos"));
+        var processor = new RefundOrderProcessor(repository, client,
             NullLogger<RefundOrderProcessor>.Instance);
 
         Assert.Equal(postFails ? 0 : 1, await processor.ProcessBatchAsync(CancellationToken.None));
@@ -86,7 +87,8 @@ public sealed class RefundOrderProcessorTests
             Assert.Equal(0, await processor.ProcessBatchAsync(CancellationToken.None));
             Assert.Equal(1, postCount);
             refunded = true; // a consulta posterior comprova o resultado ambíguo
-            Assert.Equal(1, await processor.ProcessBatchAsync(CancellationToken.None));
+            Assert.True(await new PaymentReconciliationService(repository, client)
+                .ReconcileAsync("ORDTEST123", CancellationToken.None));
         }
         Assert.Equal("Refunded",
             (await repository.GetPaymentAttemptAsync(payment.Id, CancellationToken.None))!.Status);
