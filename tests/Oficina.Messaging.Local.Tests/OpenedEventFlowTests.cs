@@ -87,11 +87,14 @@ public sealed class OpenedEventFlowTests
         await db.SaveChangesAsync();
 
         var senderWithFailure = new FailOnceSender(new SqsIntegrationMessageSender(sqs, queueUrl));
+        var clock = new ManualTimeProvider();
         var dispatcher = new OutboxDispatcher(db, senderWithFailure,
-            NullLogger<OutboxDispatcher>.Instance);
+            NullLogger<OutboxDispatcher>.Instance, clock);
         Assert.Equal(1, await dispatcher.DispatchBatchAsync(CancellationToken.None));
         Assert.Null((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
         Assert.Equal(1, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync(CancellationToken.None));
+        clock.Advance(TimeSpan.FromSeconds(2));
         Assert.Equal(1, await dispatcher.DispatchBatchAsync(CancellationToken.None));
         Assert.NotNull((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
         Assert.Equal(2, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
@@ -374,5 +377,12 @@ public sealed class OpenedEventFlowTests
                 throw new HttpRequestException("Falha SQS transitória simulada.");
             return inner.SendAsync(eventId, eventType, payloadJson, cancellationToken);
         }
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan duration) => _now += duration;
     }
 }

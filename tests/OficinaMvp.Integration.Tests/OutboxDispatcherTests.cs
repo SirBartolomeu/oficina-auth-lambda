@@ -39,15 +39,28 @@ public sealed class OutboxDispatcherTests
         db.OutboxMessages.Add(new OutboxMessage(Guid.NewGuid(), "WorkOrderOpened", "{}", DateTime.UtcNow));
         await db.SaveChangesAsync();
         var sender = new RecordingSender { Fail = true };
-        var dispatcher = new OutboxDispatcher(db, sender, NullLogger<OutboxDispatcher>.Instance);
+        var clock = new ManualTimeProvider();
+        var dispatcher = new OutboxDispatcher(db, sender,
+            NullLogger<OutboxDispatcher>.Instance, clock);
 
         await dispatcher.DispatchBatchAsync(CancellationToken.None);
         Assert.Null((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
         Assert.Equal(1, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
-        sender.Fail = false;
-        await dispatcher.DispatchBatchAsync(CancellationToken.None);
-        Assert.NotNull((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
+        Assert.Equal(clock.GetUtcNow().UtcDateTime.AddSeconds(2),
+            (await db.OutboxMessages.SingleAsync()).NextAttemptAtUtc);
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync(CancellationToken.None));
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(1, await dispatcher.DispatchBatchAsync(CancellationToken.None));
         Assert.Equal(2, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
+        Assert.Equal(clock.GetUtcNow().UtcDateTime.AddSeconds(4),
+            (await db.OutboxMessages.SingleAsync()).NextAttemptAtUtc);
+        sender.Fail = false;
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync(CancellationToken.None));
+        clock.Advance(TimeSpan.FromSeconds(4));
+        Assert.Equal(1, await dispatcher.DispatchBatchAsync(CancellationToken.None));
+        Assert.NotNull((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
+        Assert.Null((await db.OutboxMessages.SingleAsync()).NextAttemptAtUtc);
+        Assert.Equal(3, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
     }
 
     private static WorkshopDbContext CreateContext(SqliteConnection connection) =>
@@ -64,5 +77,12 @@ public sealed class OutboxDispatcherTests
             Sent.Add(eventId);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan duration) => _now += duration;
     }
 }
