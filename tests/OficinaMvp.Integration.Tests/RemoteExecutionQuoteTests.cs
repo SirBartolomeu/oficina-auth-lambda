@@ -126,6 +126,23 @@ public sealed class RemoteExecutionQuoteTests
             Assert.Equal(WorkOrderProcessState.ReadyForExecution,
                 (await paymentDb.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId))
                     .ProcessState);
+            var consumeCommand = Assert.Single(await paymentDb.OutboxMessages
+                .Where(item => item.EventType == "ConsumeStockRequested").ToListAsync());
+            var consumed = new IntegrationEnvelope<StockConsumedPayload>(Guid.NewGuid(),
+                "StockConsumed", 1, orderId, consumeCommand.EventId, orderId, null,
+                DateTime.UtcNow, new StockConsumedPayload(
+                    (await paymentDb.WorkOrders.SingleAsync(item => item.Id == orderId))
+                        .ReservationId!.Value));
+            var consumedBody = JsonSerializer.Serialize(consumed,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var consumedHandler = new StockConsumedHandler(paymentDb);
+            Assert.True(await consumedHandler.HandleAsync(consumedBody, CancellationToken.None));
+            Assert.False(await consumedHandler.HandleAsync(consumedBody, CancellationToken.None));
+            var started = await paymentDb.WorkOrders.AsNoTracking()
+                .SingleAsync(item => item.Id == orderId);
+            Assert.Equal(WorkOrderProcessState.InExecution, started.ProcessState);
+            Assert.Equal(WorkOrderStatus.InExecution, started.Status);
+            Assert.NotNull(started.ExecutionStartedAtUtc);
         }
 
         var invalid = ready with { EventId = Guid.NewGuid(),
@@ -133,7 +150,7 @@ public sealed class RemoteExecutionQuoteTests
         await Assert.ThrowsAsync<DomainException>(() => handler.HandleAsync(
             JsonSerializer.Serialize(invalid, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             CancellationToken.None));
-        Assert.Equal(4, await resultDb.InboxMessages.AsNoTracking().CountAsync());
+        Assert.Equal(5, await resultDb.InboxMessages.AsNoTracking().CountAsync());
     }
 
     [Fact]

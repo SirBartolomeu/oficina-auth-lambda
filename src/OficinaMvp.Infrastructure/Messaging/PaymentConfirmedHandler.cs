@@ -27,9 +27,17 @@ public sealed class PaymentConfirmedHandler(WorkshopDbContext dbContext)
             ?? throw new KeyNotFoundException("OS do pagamento não encontrada.");
         if (order.BranchId != envelope.BranchId ||
             order.PaymentAttemptId != envelope.Payload.PaymentAttemptId ||
-            checked((long)(order.BudgetTotal * 100m)) != envelope.Payload.TotalCents)
+            checked((long)(order.BudgetTotal * 100m)) != envelope.Payload.TotalCents ||
+            !order.ReservationId.HasValue)
             throw new DomainException("Pagamento não corresponde à OS.");
         order.ConfirmPayment(envelope.OccurredAtUtc);
+        var consume = new IntegrationEnvelope<ConsumeStockRequestedPayload>(
+            Guid.NewGuid(), "ConsumeStockRequested", 1, envelope.CorrelationId,
+            envelope.EventId, order.Id, order.BranchId, DateTime.UtcNow,
+            new ConsumeStockRequestedPayload(order.ReservationId.Value));
+        dbContext.OutboxMessages.Add(new OutboxMessage(consume.EventId, consume.EventType,
+            JsonSerializer.Serialize(consume, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            consume.OccurredAtUtc));
         dbContext.InboxMessages.Add(new InboxMessage(envelope.EventId, envelope.EventType, DateTime.UtcNow));
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;

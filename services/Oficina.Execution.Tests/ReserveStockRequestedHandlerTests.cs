@@ -76,4 +76,37 @@ public sealed class ReserveStockRequestedHandlerTests
         Assert.Equal("StockReleased", (await db.OutboxMessages.SingleAsync()).EventType);
         Assert.Single(await db.InboxMessages.ToListAsync());
     }
+
+    [Fact]
+    public async Task ConsumeCommandMarksReservationAndPublishesConfirmationOnce()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ExecutionDbContext(
+            new DbContextOptionsBuilder<ExecutionDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var part = new PartSupply("Filtro", 10m, 5);
+        db.PartSupplies.Add(part);
+        await db.SaveChangesAsync();
+        var orderId = Guid.NewGuid();
+        var reservationId = Guid.NewGuid();
+        var service = new ExecutionService(db);
+        await service.ReserveAsync(new ReserveStockRequest(reservationId, orderId,
+            [new CatalogItemRequest(part.Id, 2)]), CancellationToken.None);
+        var command = new IntegrationEnvelope<ConsumeStockRequestedPayload>(
+            Guid.NewGuid(), "ConsumeStockRequested", 1, orderId, Guid.NewGuid(),
+            orderId, "sp-centro", DateTime.UtcNow,
+            new ConsumeStockRequestedPayload(reservationId));
+        var body = JsonSerializer.Serialize(command, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var handler = new ConsumeStockRequestedHandler(db, service);
+
+        Assert.True(await handler.HandleAsync(body, CancellationToken.None));
+        Assert.False(await handler.HandleAsync(body, CancellationToken.None));
+        Assert.Equal(3, (await db.PartSupplies.SingleAsync()).StockQuantity);
+        Assert.Equal(ReservationStatus.Consumed, (await db.StockReservations.SingleAsync()).Status);
+        Assert.Equal("StockConsumed", (await db.OutboxMessages.SingleAsync()).EventType);
+        Assert.Single(await db.InboxMessages.ToListAsync());
+        await Assert.ThrowsAsync<OficinaMvp.Domain.Exceptions.DomainException>(() =>
+            service.ReleaseAsync(reservationId, CancellationToken.None));
+    }
 }

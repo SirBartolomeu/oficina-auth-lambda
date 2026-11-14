@@ -6,3 +6,5 @@ public sealed record PaymentRejectedPayload(Guid PaymentAttemptId, string Provid
     long TotalCents, string Currency, string Reason);
 public sealed record ReleaseStockRequestedPayload(Guid ReservationId, string Reason);
 public sealed record StockReleasedPayload(Guid ReservationId);
+public sealed record ConsumeStockRequestedPayload(Guid ReservationId);
+public sealed record StockConsumedPayload(Guid ReservationId);

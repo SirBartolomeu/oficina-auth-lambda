@@ -45,6 +45,9 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                         else if (eventType == "StockReleased")
                             await scope.ServiceProvider.GetRequiredService<StockReleasedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType == "StockConsumed")
+                            await scope.ServiceProvider.GetRequiredService<StockConsumedHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
                         else
                             throw new InvalidOperationException($"Evento não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);

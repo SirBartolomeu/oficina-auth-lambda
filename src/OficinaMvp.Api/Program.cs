@@ -72,6 +72,8 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
             routes["ReserveStockRequested"] = executionCommandsQueueUrl;
         if (!string.IsNullOrWhiteSpace(executionCommandsQueueUrl))
             routes["ReleaseStockRequested"] = executionCommandsQueueUrl;
+        if (!string.IsNullOrWhiteSpace(executionCommandsQueueUrl))
+            routes["ConsumeStockRequested"] = executionCommandsQueueUrl;
         builder.Services.AddSingleton<IIntegrationMessageSender>(serviceProvider =>
             new SqsIntegrationMessageSender(serviceProvider.GetRequiredService<IAmazonSQS>(), routes));
         builder.Services.AddScoped<OutboxDispatcher>();
@@ -85,6 +87,7 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
         builder.Services.AddScoped<PaymentConfirmedHandler>();
         builder.Services.AddScoped<PaymentRejectedHandler>();
         builder.Services.AddScoped<StockReleasedHandler>();
+        builder.Services.AddScoped<StockConsumedHandler>();
         builder.Services.AddHostedService<OsEventsSqsWorker>();
     }
 }

@@ -93,6 +93,21 @@ public sealed class ExecutionService(ExecutionDbContext db)
         return new ReservationResponse(reservation.Id, reservation.WorkOrderId, reservation.Status.ToString());
     }
 
+    public async Task<ReservationResponse?> ConsumeAsync(Guid reservationId,
+        CancellationToken cancellationToken, bool saveChanges = true)
+    {
+        var reservation = await db.StockReservations.SingleOrDefaultAsync(item =>
+            item.Id == reservationId, cancellationToken);
+        if (reservation is null) return null;
+        if (reservation.Status == ReservationStatus.Released)
+            throw new DomainException("Reserva liberada não pode ser consumida.");
+        if (reservation.Status == ReservationStatus.Reserved)
+            reservation.Consume();
+        if (saveChanges) await db.SaveChangesAsync(cancellationToken);
+        return new ReservationResponse(reservation.Id, reservation.WorkOrderId,
+            reservation.Status.ToString());
+    }
+
     private static Dictionary<Guid, int> Normalize(IReadOnlyCollection<CatalogItemRequest> items)
     {
         ArgumentNullException.ThrowIfNull(items);
