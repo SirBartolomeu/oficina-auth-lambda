@@ -127,7 +127,10 @@ public sealed class WorkOrderApplicationService
         }
 
         var changedAt = DateTime.UtcNow;
-        ApplyTransition(workOrder, action, changedAt);
+        if (action == WorkOrderAction.ApproveBudget && _executionQuoteClient is not null)
+            BeginDistributedReservation(workOrder, changedAt);
+        else
+            ApplyTransition(workOrder, action, changedAt);
 
         await _repository.SaveChangesAsync(cancellationToken);
         await NotifyLatestStatusAsync(workOrder, cancellationToken);
@@ -145,7 +148,10 @@ public sealed class WorkOrderApplicationService
         var occurredAt = request.OccurredAtUtc ?? DateTime.UtcNow;
         if (request.Approved)
         {
-            workOrder.ApproveBudget(occurredAt);
+            if (_executionQuoteClient is not null)
+                BeginDistributedReservation(workOrder, occurredAt);
+            else
+                workOrder.ApproveBudget(occurredAt);
         }
         else
         {
@@ -197,6 +203,20 @@ public sealed class WorkOrderApplicationService
             default:
                 throw new DomainException("Acao de transicao invalida.");
         }
+    }
+
+    private void BeginDistributedReservation(WorkOrder order, DateTime occurredAtUtc)
+    {
+        if (!order.BudgetId.HasValue || !order.BudgetVersion.HasValue)
+            throw new DomainException("O orçamento do Billing deve estar pronto antes da aprovação.");
+        var reservationId = Guid.NewGuid();
+        order.ApproveBudgetForPayment(occurredAtUtc, reservationId);
+        var parts = order.Parts.Select(item => new StockItem(item.PartSupplyId, item.Quantity)).ToArray();
+        _outbox.Enqueue(new IntegrationEnvelope<ReserveStockRequestedPayload>(
+            Guid.NewGuid(), "ReserveStockRequested", 1, order.Id, Guid.NewGuid(),
+            order.Id, order.BranchId, occurredAtUtc,
+            new ReserveStockRequestedPayload(reservationId, order.BudgetVersion.Value,
+                parts, occurredAtUtc.AddMinutes(15))));
     }
 
     private async Task<IReadOnlyCollection<WorkOrderServiceLine>> BuildServiceLinesAsync(

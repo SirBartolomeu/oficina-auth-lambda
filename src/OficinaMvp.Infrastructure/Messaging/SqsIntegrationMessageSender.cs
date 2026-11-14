@@ -4,10 +4,24 @@ using Amazon.SQS.Model;
 
 namespace OficinaMvp.Infrastructure.Messaging;
 
-public sealed class SqsIntegrationMessageSender(IAmazonSQS sqs, string queueUrl) : IIntegrationMessageSender
+public sealed class SqsIntegrationMessageSender : IIntegrationMessageSender
 {
+    private readonly IAmazonSQS _sqs;
+    private readonly IReadOnlyDictionary<string, string> _queueUrls;
+
+    public SqsIntegrationMessageSender(IAmazonSQS sqs, string billingQueueUrl)
+        : this(sqs, new Dictionary<string, string> { ["WorkOrderOpened"] = billingQueueUrl }) { }
+
+    public SqsIntegrationMessageSender(IAmazonSQS sqs, IReadOnlyDictionary<string, string> queueUrls)
+    {
+        _sqs = sqs;
+        _queueUrls = queueUrls;
+    }
+
     public async Task SendAsync(Guid eventId, string eventType, string payloadJson, CancellationToken cancellationToken)
     {
+        if (!_queueUrls.TryGetValue(eventType, out var queueUrl) || string.IsNullOrWhiteSpace(queueUrl))
+            throw new InvalidOperationException($"Fila SQS não configurada para {eventType}.");
         var request = new SendMessageRequest
         {
             QueueUrl = queueUrl,
@@ -23,6 +37,6 @@ public sealed class SqsIntegrationMessageSender(IAmazonSQS sqs, string queueUrl)
             request.MessageGroupId = document.RootElement.GetProperty("workOrderId").GetString();
             request.MessageDeduplicationId = eventId.ToString("N");
         }
-        await sqs.SendMessageAsync(request, cancellationToken);
+        await _sqs.SendMessageAsync(request, cancellationToken);
     }
 }

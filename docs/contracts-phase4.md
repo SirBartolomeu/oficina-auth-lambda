@@ -27,8 +27,8 @@ Estado: versão 1 do contrato para implementação. Donos dos dados: OS, Execuç
 | `WorkOrderOpened` | OS → Billing | `orderVersion`, `lines` (`kind`, `itemId`, `name`, `quantity`, `unitPriceCents`), `totalCents`, `currency=BRL`, `quotedAtUtc` | Criar orçamento versão 1, sem recalcular a partir de preço atual |
 | `BudgetReady` | Billing → OS | `budgetId`, `budgetVersion`, `totalCents`, `currency=BRL` | OS confere valor/filial e muda para aguardando aprovação; duplicata mantém o estado |
 | `BudgetApproved` / `BudgetRefused` | Billing → OS | `budgetId`, `budgetVersion`, `decisionId`, motivo opcional | OS aceita somente decisão da versão corrente; recusa encerra/revisa tentativa |
-| `ReserveStockRequested` | OS → Execução | `reservationId`, itens/quantidades, `expiresAtUtc` | Reserva atômica, idempotente e condicionada a saldo; emite confirmado/recusado |
-| `StockReserved` / `StockReservationRejected` | Execução → OS | `reservationId`, `orderVersion`, motivo opcional | Confirmado libera cobrança; recusado volta para revisão |
+| `ReserveStockRequested` | OS → Execução | `reservationId`, `orderVersion`, peças/quantidades, `expiresAtUtc` | Reserva atômica, idempotente e condicionada a saldo; emite confirmado/recusado |
+| `StockReserved` / `StockReservationRejected` | Execução → OS | `reservationId`, `orderVersion`, motivo opcional | Confirmado muda o processo para aguardar pagamento; recusado cancela a tentativa antes da execução |
 | `CreatePaymentRequested` | OS → Billing | `paymentAttemptId`, `budgetId`, `budgetVersion`, `totalCents`, `currency` | Billing cria tentativa com chave estável de idempotência Mercado Pago |
 | `PaymentConfirmed` / `PaymentRejected` | Billing → OS | `paymentAttemptId`, `providerOrderId`, `totalCents`, `currency` | Confirmação exige consulta ao provedor; rejeição libera reserva após reconciliação |
 | `ReleaseStockRequested` | OS → Execução | `reservationId`, `reason` | Liberação idempotente; não libera após consumo irreversível |
@@ -38,7 +38,9 @@ Estado: versão 1 do contrato para implementação. Donos dos dados: OS, Execuç
 
 Os nomes são contratos de integração, não confirmação de serviços já implementados. Para SQS, usar filas por consumidor com DLQ, visibilidade adequada e idempotência; a ordem é conferida por versão e estado. Outbox transacional em SQL/DynamoDB impede perda entre persistência e publicação. O timeout de cobrança entra em reconciliação, nunca em nova cobrança automática. O webhook Mercado Pago apenas sinaliza alteração; Billing consulta a Orders API para confirmar estado, valor e referência antes de publicar `PaymentConfirmed`.
 
-No evento raiz `WorkOrderOpened`, a OS gera `causationId` para a requisição de abertura e usa `workOrderId` como `correlationId`. A Outbox SQL armazena o envelope JSON na mesma transação que grava a OS. O Billing grava orçamento, Inbox e `BudgetReady` pendente em uma transação DynamoDB. Seu publicador envia a resposta por SQS; a OS registra Inbox e transição de estado na mesma transação SQL. O `budgetId` da versão criada a partir desse evento usa o `eventId` de `WorkOrderOpened`, garantindo identidade estável em reentregas. Os demais comandos da Saga ainda não estão implementados.
+No evento raiz `WorkOrderOpened`, a OS gera `causationId` para a requisição de abertura e usa `workOrderId` como `correlationId`. A Outbox SQL armazena o envelope JSON na mesma transação que grava a OS. O Billing grava orçamento, Inbox e `BudgetReady` pendente em uma transação DynamoDB. Seu publicador envia a resposta por SQS; a OS registra Inbox e transição de estado na mesma transação SQL. O `budgetId` da versão criada a partir desse evento usa o `eventId` de `WorkOrderOpened`, garantindo identidade estável em reentregas. Os comandos de pagamento, execução e compensação ainda não estão implementados.
+
+Após aprovação na OS com cotação remota, `ReserveStockRequested` é gravado na Outbox SQL junto com o estado `AwaitingStockReservation`. Execução valida prazo e saldo, grava reserva, Inbox e resultado na mesma transação; a OS valida `reservationId`, versão e filial antes de aceitar `StockReserved` ou `StockReservationRejected`. A recusa cancela a tentativa sem iniciar serviço ou cobrança. A decisão de aprovação ainda vem do endpoint legado da OS; a aprovação via Billing será integrada no corte final da Saga.
 
 ## REST síncrono necessário
 

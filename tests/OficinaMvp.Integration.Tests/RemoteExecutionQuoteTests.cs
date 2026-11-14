@@ -9,6 +9,7 @@ using OficinaMvp.Application.Ports;
 using OficinaMvp.Infrastructure.Persistence;
 using OficinaMvp.Infrastructure.Messaging;
 using OficinaMvp.Domain.Exceptions;
+using OficinaMvp.Domain.Entities;
 using OficinaMvp.Integration.Tests.Infrastructure;
 
 namespace OficinaMvp.Integration.Tests;
@@ -59,6 +60,29 @@ public sealed class RemoteExecutionQuoteTests
         Assert.False(await handler.HandleAsync(readyJson, CancellationToken.None));
         Assert.Single(await scope.ServiceProvider.GetRequiredService<WorkshopDbContext>()
             .InboxMessages.AsNoTracking().ToListAsync());
+
+        var approval = await client.PostAsJsonAsync($"/api/work-orders/{orderId}/approve-budget", new { });
+        approval.EnsureSuccessStatusCode();
+        var db = scope.ServiceProvider.GetRequiredService<WorkshopDbContext>();
+        var approved = await db.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId);
+        Assert.Equal(WorkOrderProcessState.AwaitingStockReservation, approved.ProcessState);
+        Assert.NotNull(approved.ReservationId);
+        var reserve = Assert.Single(await db.OutboxMessages.AsNoTracking()
+            .Where(item => item.EventType == "ReserveStockRequested").ToListAsync());
+        using var reserveJson = JsonDocument.Parse(reserve.PayloadJson);
+        Assert.Equal(2, reserveJson.RootElement.GetProperty("payload")
+            .GetProperty("parts")[0].GetProperty("quantity").GetInt32());
+        var reserved = new IntegrationEnvelope<StockReservationResultPayload>(
+            Guid.NewGuid(), "StockReserved", 1, orderId, reserve.EventId, orderId, null,
+            DateTime.UtcNow, new StockReservationResultPayload(approved.ReservationId!.Value, 1, null));
+        var reservedBody = JsonSerializer.Serialize(reserved, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var reservationScope = factory.Services.CreateScope();
+        var resultDb = reservationScope.ServiceProvider.GetRequiredService<WorkshopDbContext>();
+        var resultHandler = new StockReservationResultHandler(resultDb);
+        Assert.True(await resultHandler.HandleAsync(reservedBody, CancellationToken.None));
+        Assert.False(await resultHandler.HandleAsync(reservedBody, CancellationToken.None));
+        Assert.Equal(WorkOrderProcessState.AwaitingPayment,
+            (await resultDb.WorkOrders.AsNoTracking().SingleAsync(item => item.Id == orderId)).ProcessState);
         var updated = await client.GetFromJsonAsync<JsonElement>($"/api/work-orders/{orderId}");
         Assert.Equal("AwaitingApproval", updated.GetProperty("status").GetString());
 
@@ -67,8 +91,7 @@ public sealed class RemoteExecutionQuoteTests
         await Assert.ThrowsAsync<DomainException>(() => handler.HandleAsync(
             JsonSerializer.Serialize(invalid, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             CancellationToken.None));
-        Assert.Single(await scope.ServiceProvider.GetRequiredService<WorkshopDbContext>()
-            .InboxMessages.AsNoTracking().ToListAsync());
+        Assert.Equal(2, await resultDb.InboxMessages.AsNoTracking().CountAsync());
     }
 
     [Fact]

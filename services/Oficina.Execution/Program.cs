@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Amazon;
+using Amazon.Runtime;
+using Amazon.SQS;
 using Oficina.Execution;
 using Oficina.Execution.Contracts;
 using Oficina.Execution.Persistence;
@@ -23,6 +26,24 @@ builder.Services.AddDbContext<ExecutionDbContext>(options =>
         options.UseSqlite(connectionString);
 });
 builder.Services.AddScoped<ExecutionService>();
+builder.Services.AddScoped<ReserveStockRequestedHandler>();
+var commandsQueueUrl = builder.Configuration["Messaging:CommandsQueueUrl"];
+var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];
+if (!string.IsNullOrWhiteSpace(commandsQueueUrl) || !string.IsNullOrWhiteSpace(osEventsQueueUrl))
+{
+    var sqsServiceUrl = builder.Configuration["Messaging:SqsServiceUrl"];
+    var region = RegionEndpoint.GetBySystemName(builder.Configuration["AWS:Region"] ?? "us-east-1");
+    builder.Services.AddSingleton<IAmazonSQS>(_ => string.IsNullOrWhiteSpace(sqsServiceUrl)
+        ? new AmazonSQSClient(region)
+        : new AmazonSQSClient(new BasicAWSCredentials("local", "local"), new AmazonSQSConfig
+        {
+            ServiceURL = sqsServiceUrl
+        }));
+    if (!string.IsNullOrWhiteSpace(commandsQueueUrl))
+        builder.Services.AddHostedService<ExecutionCommandsWorker>();
+    if (!string.IsNullOrWhiteSpace(osEventsQueueUrl))
+        builder.Services.AddHostedService<ExecutionOutboxWorker>();
+}
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 

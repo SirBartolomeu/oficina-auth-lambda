@@ -49,8 +49,11 @@ builder.Services.AddScoped<WorkshopCatalogApplicationService>();
 builder.Services.AddScoped<WorkOrderApplicationService>();
 
 var billingQueueUrl = builder.Configuration["Messaging:BillingQueueUrl"];
+var executionCommandsQueueUrl = builder.Configuration["Messaging:ExecutionCommandsQueueUrl"];
 var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];
-if (!string.IsNullOrWhiteSpace(billingQueueUrl) || !string.IsNullOrWhiteSpace(osEventsQueueUrl))
+if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
+    !string.IsNullOrWhiteSpace(executionCommandsQueueUrl) ||
+    !string.IsNullOrWhiteSpace(osEventsQueueUrl))
 {
     var sqsServiceUrl = builder.Configuration["Messaging:SqsServiceUrl"];
     var region = RegionEndpoint.GetBySystemName(builder.Configuration["AWS:Region"] ?? "us-east-1");
@@ -60,16 +63,21 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) || !string.IsNullOrWhiteSpace(os
         {
             ServiceURL = sqsServiceUrl
         }));
-    if (!string.IsNullOrWhiteSpace(billingQueueUrl))
+    if (!string.IsNullOrWhiteSpace(billingQueueUrl) || !string.IsNullOrWhiteSpace(executionCommandsQueueUrl))
     {
+        var routes = new Dictionary<string, string>();
+        if (!string.IsNullOrWhiteSpace(billingQueueUrl)) routes["WorkOrderOpened"] = billingQueueUrl;
+        if (!string.IsNullOrWhiteSpace(executionCommandsQueueUrl))
+            routes["ReserveStockRequested"] = executionCommandsQueueUrl;
         builder.Services.AddSingleton<IIntegrationMessageSender>(serviceProvider =>
-            new SqsIntegrationMessageSender(serviceProvider.GetRequiredService<IAmazonSQS>(), billingQueueUrl));
+            new SqsIntegrationMessageSender(serviceProvider.GetRequiredService<IAmazonSQS>(), routes));
         builder.Services.AddScoped<OutboxDispatcher>();
         builder.Services.AddHostedService<OutboxBackgroundService>();
     }
     if (!string.IsNullOrWhiteSpace(osEventsQueueUrl))
     {
         builder.Services.AddScoped<BudgetReadyHandler>();
+        builder.Services.AddScoped<StockReservationResultHandler>();
         builder.Services.AddHostedService<OsEventsSqsWorker>();
     }
 }

@@ -200,6 +200,9 @@ namespace OficinaMvp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<Guid?>("ReservationId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("ServicesTotal")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");

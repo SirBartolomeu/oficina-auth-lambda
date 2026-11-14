@@ -1,5 +1,6 @@
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using System.Text.Json;
 using OficinaMvp.Infrastructure.Messaging;
 
 namespace OficinaMvp.Api.Messaging;
@@ -24,8 +25,16 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                     try
                     {
                         using var scope = scopes.CreateScope();
-                        await scope.ServiceProvider.GetRequiredService<BudgetReadyHandler>()
-                            .HandleAsync(message.Body, stoppingToken);
+                        using var envelope = JsonDocument.Parse(message.Body);
+                        var eventType = envelope.RootElement.GetProperty("eventType").GetString();
+                        if (eventType == "BudgetReady")
+                            await scope.ServiceProvider.GetRequiredService<BudgetReadyHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType is "StockReserved" or "StockReservationRejected")
+                            await scope.ServiceProvider.GetRequiredService<StockReservationResultHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
+                        else
+                            throw new InvalidOperationException($"Evento não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

@@ -133,6 +133,22 @@ public sealed class WorkOrderTests
         Assert.Throws<DomainException>(() => workOrder.ConfirmPayment(now.AddMinutes(5)));
     }
 
+    [Fact]
+    public void StockReservationRejection_ShouldCancelBeforePayment()
+    {
+        var order = BuildDefaultWorkOrder();
+        var reservationId = Guid.NewGuid();
+        order.SendBudget(DateTime.UtcNow);
+        order.ApproveBudgetForPayment(DateTime.UtcNow, reservationId);
+
+        order.RejectStockReservation(DateTime.UtcNow, "Estoque insuficiente");
+
+        Assert.Equal(reservationId, order.ReservationId);
+        Assert.Equal(WorkOrderProcessState.Canceled, order.ProcessState);
+        Assert.Null(order.ExecutionStartedAtUtc);
+        Assert.Throws<DomainException>(() => order.ConfirmStockReservation(DateTime.UtcNow));
+    }
+
     private static WorkOrder BuildDefaultWorkOrder(DateTime? now = null)
     {
         var createdAt = now ?? DateTime.UtcNow;

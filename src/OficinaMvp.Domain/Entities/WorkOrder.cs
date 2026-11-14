@@ -55,6 +55,7 @@ public sealed class WorkOrder
     public WorkOrderProcessState ProcessState { get; private set; }
     public Guid? BudgetId { get; private set; }
     public int? BudgetVersion { get; private set; }
+    public Guid? ReservationId { get; private set; }
     public string Notes { get; private set; } = string.Empty;
     public string? BranchId { get; private set; }
     public decimal ServicesTotal { get; private set; }
@@ -121,11 +122,14 @@ public sealed class WorkOrder
         ChangeStatus(WorkOrderStatus.InExecution, changedAtUtc, "Cliente aprovou o orçamento. Serviço em execução.");
     }
 
-    public void ApproveBudgetForPayment(DateTime changedAtUtc)
+    public void ApproveBudgetForPayment(DateTime changedAtUtc, Guid? reservationId = null)
     {
         EnsureCurrentStatus(WorkOrderStatus.AwaitingApproval);
         EnsureProcessState(WorkOrderProcessState.AwaitingApproval);
+        if (reservationId == Guid.Empty)
+            throw new DomainException("Identificador de reserva inválido.");
         ApprovedAtUtc = changedAtUtc;
+        ReservationId = reservationId;
         ProcessState = WorkOrderProcessState.AwaitingStockReservation;
         RecordProcessNote(changedAtUtc, "Orçamento aprovado. Aguardando reserva de peças.");
     }
@@ -135,6 +139,12 @@ public sealed class WorkOrder
         EnsureProcessState(WorkOrderProcessState.AwaitingStockReservation);
         ProcessState = WorkOrderProcessState.AwaitingPayment;
         RecordProcessNote(changedAtUtc, "Peças reservadas. Aguardando pagamento.");
+    }
+
+    public void RejectStockReservation(DateTime changedAtUtc, string reason)
+    {
+        EnsureProcessState(WorkOrderProcessState.AwaitingStockReservation);
+        CancelBeforeExecution(changedAtUtc, reason);
     }
 
     public void ConfirmPayment(DateTime changedAtUtc)

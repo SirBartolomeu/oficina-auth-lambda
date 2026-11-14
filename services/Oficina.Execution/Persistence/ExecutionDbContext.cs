@@ -8,9 +8,26 @@ public sealed class ExecutionDbContext(DbContextOptions<ExecutionDbContext> opti
     public DbSet<RepairService> RepairServices => Set<RepairService>();
     public DbSet<PartSupply> PartSupplies => Set<PartSupply>();
     public DbSet<StockReservation> StockReservations => Set<StockReservation>();
+    public DbSet<ExecutionInboxMessage> InboxMessages => Set<ExecutionInboxMessage>();
+    public DbSet<ExecutionOutboxMessage> OutboxMessages => Set<ExecutionOutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ExecutionInboxMessage>(entity =>
+        {
+            entity.ToTable("inbox_messages");
+            entity.HasKey(item => item.EventId);
+            entity.Property(item => item.EventType).IsRequired().HasMaxLength(80);
+        });
+        modelBuilder.Entity<ExecutionOutboxMessage>(entity =>
+        {
+            entity.ToTable("outbox_messages");
+            entity.HasKey(item => item.EventId);
+            entity.Property(item => item.EventType).IsRequired().HasMaxLength(80);
+            entity.Property(item => item.Body).IsRequired();
+            entity.HasIndex(item => new { item.PublishedAtUtc, item.OccurredAtUtc });
+        });
+
         modelBuilder.Entity<RepairService>(entity =>
         {
             entity.ToTable("repair_services");

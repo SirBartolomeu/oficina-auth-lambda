@@ -35,7 +35,8 @@ public sealed class ExecutionService(ExecutionDbContext db)
         return new QuoteResponse(quotedServices, quotedParts, total);
     }
 
-    public async Task<ReservationResponse> ReserveAsync(ReserveStockRequest request, CancellationToken cancellationToken)
+    public async Task<ReservationResponse> ReserveAsync(ReserveStockRequest request,
+        CancellationToken cancellationToken, bool saveChanges = true)
     {
         if (request.ReservationId == Guid.Empty || request.WorkOrderId == Guid.Empty)
             throw new DomainException("Identificadores da reserva e OS são obrigatórios.");
@@ -57,11 +58,14 @@ public sealed class ExecutionService(ExecutionDbContext db)
         if (parts.Count != quantities.Count)
             throw new DomainException("Peça não encontrada para reserva.");
         foreach (var item in quantities)
+            if (parts[item.Key].StockQuantity < item.Value)
+                throw new DomainException($"Estoque insuficiente para {parts[item.Key].Name}.");
+        foreach (var item in quantities)
             parts[item.Key].RemoveFromStock(item.Value);
 
         db.StockReservations.Add(new StockReservation(request.ReservationId, request.WorkOrderId,
             quantities.Select(item => new StockReservationLine(item.Key, item.Value))));
-        await db.SaveChangesAsync(cancellationToken);
+        if (saveChanges) await db.SaveChangesAsync(cancellationToken);
         return new ReservationResponse(request.ReservationId, request.WorkOrderId, ReservationStatus.Reserved.ToString());
     }
 

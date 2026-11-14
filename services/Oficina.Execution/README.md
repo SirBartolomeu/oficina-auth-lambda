@@ -1,6 +1,6 @@
 # Oficina Execution (extração em andamento)
 
-Serviço independente de catálogo técnico, cotação de serviços/peças e reserva de estoque. Reaproveita as regras `RepairService` e `PartSupply` da solução original, com persistência PostgreSQL própria. A OS já pode consumir a cotação HTTP; ainda não há consumo de SQS, fila de reparos ou deploy Kubernetes. Não usar como evidência de Fase 4 completa.
+Serviço independente de catálogo técnico, cotação de serviços/peças e reserva de estoque. Reaproveita as regras `RepairService` e `PartSupply` da solução original, com persistência PostgreSQL própria. A OS consome a cotação HTTP; quando `Messaging:CommandsQueueUrl` está configurado, Execução recebe `ReserveStockRequested` por SQS e grava Inbox, reserva e resultado na Outbox na mesma transação SQL. `Messaging:OsEventsQueueUrl` ativa a publicação de `StockReserved`/`StockReservationRejected`. A fila de reparos e o deploy Kubernetes ainda não foram concluídos.
 
 ## Local
 
@@ -18,6 +18,18 @@ Para testar:
 ```powershell
 dotnet test services/Oficina.Execution.Tests/Oficina.Execution.Tests.csproj
 ```
+
+O teste local de ida e volta da reserva usa ElasticMQ e bancos SQLite em memória:
+
+```powershell
+docker compose -f compose.messaging.yml up -d elasticmq
+docker compose -f compose.billing.yml up -d dynamodb-local
+$env:MESSAGING_SQS_ENDPOINT='http://127.0.0.1:9324'
+$env:BILLING_DYNAMO_ENDPOINT='http://127.0.0.1:8000'
+dotnet test tests/Oficina.Messaging.Local.Tests/Oficina.Messaging.Local.Tests.csproj
+```
+
+O URL DynamoDB é usado pelo cenário de orçamento do mesmo projeto de testes. `Messaging:SqsServiceUrl` é apenas para o emulador; na AWS o SDK usa a identidade temporária do workload.
 
 Os testes de concorrência usam PostgreSQL de verdade, exposto pelo Compose somente em `127.0.0.1:5433`:
 
