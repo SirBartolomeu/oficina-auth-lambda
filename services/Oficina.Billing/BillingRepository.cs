@@ -239,8 +239,98 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             RefundRequestId = item.TryGetValue("refundRequestId", out var refundId)
                 ? Guid.Parse(refundId.S) : null,
             RefundReason = item.TryGetValue("refundReason", out var refundReason)
-                ? refundReason.S : null
+                ? refundReason.S : null,
+            RefundSubmittedAtUtc = item.TryGetValue("refundSubmittedAtUtc", out var submitted)
+                ? DateTime.Parse(submitted.S, null,
+                    System.Globalization.DateTimeStyles.RoundtripKind) : null
         };
+    }
+
+    public async Task<bool> BeginRefundSubmissionAsync(Guid paymentAttemptId,
+        Guid refundRequestId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await dynamo.UpdateItemAsync(new UpdateItemRequest
+            {
+                TableName = _table, Key = PaymentKey(paymentAttemptId),
+                ConditionExpression = "#status = :requested AND refundRequestId = :refundId",
+                UpdateExpression = "SET #status = :submitting, refundSubmittedAtUtc = :at",
+                ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                {
+                    [":requested"] = new() { S = "RefundRequested" },
+                    [":submitting"] = new() { S = "RefundSubmitting" },
+                    [":refundId"] = new() { S = refundRequestId.ToString("D") },
+                    [":at"] = new() { S = DateTime.UtcNow.ToString("O") }
+                }
+            }, cancellationToken);
+            return true;
+        }
+        catch (ConditionalCheckFailedException)
+        {
+            var current = await GetPaymentAttemptAsync(paymentAttemptId, cancellationToken);
+            if (current?.Status == "RefundSubmitting" &&
+                current.RefundRequestId == refundRequestId) return false;
+            throw new InvalidOperationException("Conflito ao iniciar estorno.");
+        }
+    }
+
+    public async Task<bool> ConfirmRefundAsync(PaymentRequest payment,
+        Guid refundRequestId, string providerOrderId, CancellationToken cancellationToken)
+    {
+        var eventId = Guid.NewGuid();
+        var occurredAt = DateTime.UtcNow;
+        var confirmed = new RefundConfirmedEnvelope(eventId, "RefundConfirmed", 1,
+            payment.WorkOrderId, refundRequestId, payment.WorkOrderId, payment.BranchId,
+            occurredAt, new RefundConfirmedPayload(payment.Id, refundRequestId,
+                providerOrderId, payment.TotalCents, "BRL"));
+        var outbox = OutboxKey(eventId);
+        outbox["body"] = new AttributeValue { S = JsonSerializer.Serialize(confirmed,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outbox["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
+        try
+        {
+            await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
+            {
+                TransactItems =
+                [
+                    new TransactWriteItem { Update = new Update
+                    {
+                        TableName = _table, Key = PaymentKey(payment.Id),
+                        ConditionExpression = "#status = :submitting AND refundRequestId = :refundId AND providerOrderId = :orderId",
+                        UpdateExpression = "SET #status = :refunded, refundedAtUtc = :at",
+                        ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                        ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                        {
+                            [":submitting"] = new() { S = "RefundSubmitting" },
+                            [":refunded"] = new() { S = "Refunded" },
+                            [":refundId"] = new() { S = refundRequestId.ToString("D") },
+                            [":orderId"] = new() { S = providerOrderId },
+                            [":at"] = new() { S = occurredAt.ToString("O") }
+                        }
+                    } },
+                    new TransactWriteItem { Delete = new Delete
+                    {
+                        TableName = _table, Key = PendingRefundKey(payment.Id),
+                        ConditionExpression = "attribute_exists(pk)"
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = outbox,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } }
+                ]
+            }, cancellationToken);
+            return true;
+        }
+        catch (TransactionCanceledException)
+        {
+            var current = await GetPaymentAttemptAsync(payment.Id, cancellationToken);
+            if (current?.Status == "Refunded" && current.RefundRequestId == refundRequestId &&
+                current.ProviderOrderId == providerOrderId) return false;
+            throw new InvalidOperationException("Conflito ao confirmar estorno.");
+        }
     }
 
     public async Task<bool> RecordRefundRequestAsync(Guid refundRequestId,

@@ -203,6 +203,14 @@ public sealed class WorkOrder
         RecordProcessNote(changedAtUtc, $"Estorno solicitado após revisão: {reason.Trim()}");
     }
 
+    public void ConfirmRefund(DateTime changedAtUtc)
+    {
+        EnsureProcessState(WorkOrderProcessState.RefundRequested);
+        ProcessState = WorkOrderProcessState.Canceled;
+        ChangeStatus(WorkOrderStatus.Canceled, changedAtUtc,
+            "Estorno confirmado pelo provedor. OS cancelada.");
+    }
+
     public void CancelBeforeExecution(DateTime changedAtUtc, string reason)
     {
         if (ProcessState is not WorkOrderProcessState.AwaitingStockReservation

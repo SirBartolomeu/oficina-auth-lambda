@@ -71,6 +71,26 @@ public sealed class ExecutionRejectionTests
             refundBody.RootElement.GetProperty("payload").GetProperty("refundRequestId").GetGuid());
         Assert.Equal(paymentId,
             refundBody.RootElement.GetProperty("payload").GetProperty("paymentAttemptId").GetGuid());
+
+        var confirmed = new IntegrationEnvelope<RefundConfirmedPayload>(Guid.NewGuid(),
+            "RefundConfirmed", 1, order.Id, requested.RefundRequestId!.Value,
+            order.Id, order.BranchId, DateTime.UtcNow,
+            new RefundConfirmedPayload(paymentId, requested.RefundRequestId.Value,
+                "ORDTEST123", 12500, "BRL"));
+        var confirmationBody = JsonSerializer.Serialize(confirmed,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var confirmationHandler = new RefundConfirmedHandler(db);
+        var wrongRefund = confirmed with { EventId = Guid.NewGuid(),
+            Payload = confirmed.Payload with { RefundRequestId = Guid.NewGuid() } };
+        await Assert.ThrowsAsync<DomainException>(() => confirmationHandler.HandleAsync(
+            JsonSerializer.Serialize(wrongRefund,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)), CancellationToken.None));
+        Assert.Equal(WorkOrderProcessState.RefundRequested, order.ProcessState);
+        Assert.True(await confirmationHandler.HandleAsync(confirmationBody, CancellationToken.None));
+        Assert.False(await confirmationHandler.HandleAsync(confirmationBody, CancellationToken.None));
+        Assert.Equal(WorkOrderProcessState.Canceled, order.ProcessState);
+        Assert.Equal(WorkOrderStatus.Canceled, order.Status);
+        Assert.Equal(2, await db.InboxMessages.CountAsync());
     }
 
     private sealed class NoOpNotifier : IWorkOrderStatusNotifier

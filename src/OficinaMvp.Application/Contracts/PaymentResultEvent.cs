@@ -18,3 +18,5 @@ public sealed record ExecutionRejectedPayload(Guid ExecutionId, Guid Reservation
     Guid PaymentAttemptId, string Reason);
 public sealed record RefundPaymentRequestedPayload(Guid PaymentAttemptId,
     Guid RefundRequestId, string Reason);
+public sealed record RefundConfirmedPayload(Guid PaymentAttemptId, Guid RefundRequestId,
+    string ProviderOrderId, long TotalCents, string Currency);

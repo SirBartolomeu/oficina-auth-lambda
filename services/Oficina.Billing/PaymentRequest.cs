@@ -15,6 +15,7 @@ public sealed record PaymentAttempt(Guid Id, string Status, string? ProviderOrde
 {
     public Guid? RefundRequestId { get; init; }
     public string? RefundReason { get; init; }
+    public DateTime? RefundSubmittedAtUtc { get; init; }
 }
 
 public sealed class PaymentRequestHandler(BillingRepository repository)

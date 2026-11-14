@@ -46,6 +46,9 @@ if (!string.IsNullOrWhiteSpace(mercadoPagoToken) || !string.IsNullOrWhiteSpace(m
     builder.Services.AddScoped<PaymentOrderProcessor>();
     builder.Services.AddScoped<PaymentReconciliationService>();
     builder.Services.AddHostedService<PaymentOrderWorker>();
+    builder.Services.AddScoped<RefundOrderProcessor>();
+    if (builder.Configuration.GetValue<bool>("MercadoPago:EnableRefundWorker"))
+        builder.Services.AddHostedService<RefundOrderWorker>();
 }
 var workOrdersQueueUrl = builder.Configuration["Messaging:WorkOrdersQueueUrl"];
 var osEventsQueueUrl = builder.Configuration["Messaging:OsEventsQueueUrl"];

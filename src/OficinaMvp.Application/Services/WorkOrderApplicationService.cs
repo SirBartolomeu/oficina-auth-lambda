@@ -103,7 +103,8 @@ public sealed class WorkOrderApplicationService
         var workOrders = await _repository.ListWorkOrdersAsync(cancellationToken);
 
         return workOrders
-            .Where(item => item.Status is not WorkOrderStatus.Finalized and not WorkOrderStatus.Delivered)
+            .Where(item => item.Status is not WorkOrderStatus.Finalized
+                and not WorkOrderStatus.Delivered and not WorkOrderStatus.Canceled)
             .OrderBy(item => GetActiveListPriority(item.Status))
             .ThenBy(item => item.CreatedAtUtc)
             .ToList();
