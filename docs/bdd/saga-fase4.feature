@@ -64,3 +64,9 @@ Funcionalidade: Saga da ordem de serviço distribuída
       | OS       |
       | Billing  |
       | Execução |
+
+  Cenário: Duas réplicas da OS não publicam a mesma linha da Outbox ao mesmo tempo
+    Dado que há uma mensagem pendente na Outbox PostgreSQL da OS
+    Quando um publicador a seleciona e mantém o envio em andamento
+    Então o segundo publicador não seleciona a mesma linha
+    E somente um envio é confirmado após o primeiro concluir
