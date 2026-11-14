@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
-using Microsoft.EntityFrameworkCore;
 using Oficina.Execution.Persistence;
 
 namespace Oficina.Execution;
@@ -75,46 +74,18 @@ public sealed class ExecutionOutboxWorker(IAmazonSQS sqs, IServiceScopeFactory s
             {
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ExecutionDbContext>();
-                var now = DateTime.UtcNow;
-                var postgres = db.Database.IsNpgsql();
-                await using var transaction = postgres
-                    ? await db.Database.BeginTransactionAsync(stoppingToken)
-                    : null;
-                var pending = postgres
-                    ? await db.OutboxMessages.FromSqlInterpolated($"""
-                        SELECT * FROM outbox_messages
-                        WHERE "PublishedAtUtc" IS NULL
-                          AND ("NextAttemptAtUtc" IS NULL OR "NextAttemptAtUtc" <= {now})
-                        ORDER BY "OccurredAtUtc"
-                        LIMIT 10 FOR UPDATE SKIP LOCKED
-                        """).ToListAsync(stoppingToken)
-                    : await db.OutboxMessages.Where(item => item.PublishedAtUtc == null &&
-                            (item.NextAttemptAtUtc == null || item.NextAttemptAtUtc <= now))
-                        .OrderBy(item => item.OccurredAtUtc).Take(10).ToListAsync(stoppingToken);
-                foreach (var item in pending)
+                var dispatcher = new ExecutionOutboxDispatcher(db, async (item, ct) =>
                 {
-                    try
+                    var request = new SendMessageRequest { QueueUrl = queueUrl, MessageBody = item.Body };
+                    if (queueUrl.EndsWith(".fifo", StringComparison.OrdinalIgnoreCase))
                     {
-                        var request = new SendMessageRequest { QueueUrl = queueUrl, MessageBody = item.Body };
-                        if (queueUrl.EndsWith(".fifo", StringComparison.OrdinalIgnoreCase))
-                        {
-                            using var body = JsonDocument.Parse(item.Body);
-                            request.MessageGroupId = body.RootElement.GetProperty("workOrderId").GetString();
-                            request.MessageDeduplicationId = item.EventId.ToString("N");
-                        }
-                        await sqs.SendMessageAsync(request, stoppingToken);
-                        item.MarkPublished(DateTime.UtcNow);
-                        await db.SaveChangesAsync(stoppingToken);
+                        using var body = JsonDocument.Parse(item.Body);
+                        request.MessageGroupId = body.RootElement.GetProperty("workOrderId").GetString();
+                        request.MessageDeduplicationId = item.EventId.ToString("N");
                     }
-                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-                    catch (Exception error)
-                    {
-                        item.MarkFailed(error.Message, DateTime.UtcNow);
-                        await db.SaveChangesAsync(stoppingToken);
-                        logger.LogWarning(error, "Falha ao publicar resultado {EventId} da reserva", item.EventId);
-                    }
-                }
-                if (transaction is not null) await transaction.CommitAsync(stoppingToken);
+                    await sqs.SendMessageAsync(request, ct);
+                }, logger);
+                await dispatcher.DispatchBatchAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception error)

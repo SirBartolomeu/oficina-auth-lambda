@@ -17,6 +17,7 @@ jobs:
       BILLING_DYNAMO_ENDPOINT: http://127.0.0.1:8000
       MESSAGING_SQS_ENDPOINT: http://127.0.0.1:9324
       OS_POSTGRES_CONNECTION_STRING: Host=127.0.0.1;Port=5433;Database=oficina_execution;Username=execution;Password=execution-local-password;Search Path=os_outbox_retry_ci
+      EXECUTION_OUTBOX_POSTGRES_CONNECTION_STRING: Host=127.0.0.1;Port=5433;Database=oficina_execution;Username=execution;Password=execution-local-password;Search Path=execution_outbox_retry_ci
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,8 +45,10 @@ jobs:
           docker compose -f compose.billing.yml -f compose.messaging.yml -f compose.execution.yml ps
           exit 1
 
-      - name: Prepare isolated OS schema
-        run: docker compose -f compose.execution.yml exec -T execution-db psql -U execution -d oficina_execution -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS os_outbox_retry_ci'
+      - name: Prepare isolated PostgreSQL schemas
+        run: |
+          docker compose -f compose.execution.yml exec -T execution-db psql -U execution -d oficina_execution -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS os_outbox_retry_ci'
+          docker compose -f compose.execution.yml exec -T execution-db psql -U execution -d oficina_execution -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS execution_outbox_retry_ci'
 
       - name: Billing unit tests
         run: dotnet test services/Oficina.Billing.Tests --configuration Release --logger trx --results-directory test-results/billing-unit
@@ -61,6 +64,9 @@ jobs:
 
       - name: OS PostgreSQL concurrency test
         run: dotnet test tests/OficinaMvp.Postgres.Tests --configuration Release --logger trx --results-directory test-results/os-postgres
+
+      - name: Execution PostgreSQL Outbox concurrency test
+        run: dotnet test services/Oficina.Execution.Postgres.Tests --configuration Release --filter FullyQualifiedName~ExecutionOutboxConcurrencyTests --logger trx --results-directory test-results/execution-postgres
 
       - name: Upload test reports
         if: always()
