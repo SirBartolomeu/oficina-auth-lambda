@@ -22,4 +22,6 @@ $env:BILLING_DYNAMO_ENDPOINT='http://localhost:8000'
 .\.dotnet_home\sdk10\dotnet.exe test tests/OficinaMvp.Integration.Tests --no-restore
 ```
 
+O workflow [phase4-local.yml](../../.github/workflows/phase4-local.yml) prepara os dois emuladores em um runner hospedado pelo GitHub, executa Billing/Execução/Saga e publica arquivos TRX. Foi validado localmente, mas ainda não há execução remota nem relatório de CI.
+
 Antes de marcar BDD como completo, ampliar duplicatas e falhas para os demais caminhos e gerar evidência de execução no CI. O arquivo `.feature` ainda precisa de um runner Gherkin se a avaliação exigir execução direta da especificação. Testes com Mercado Pago real dependem de credenciais de testes.

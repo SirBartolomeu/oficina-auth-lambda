@@ -1,0 +1,62 @@
+name: phase4-local
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase4-tests:
+    runs-on: ubuntu-latest
+    env:
+      BILLING_DYNAMO_ENDPOINT: http://127.0.0.1:8000
+      MESSAGING_SQS_ENDPOINT: http://127.0.0.1:9324
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Start local message and database emulators
+        run: docker compose -f compose.billing.yml -f compose.messaging.yml up -d dynamodb-local elasticmq
+
+      - name: Wait for local emulators
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if curl --silent --output /dev/null "$BILLING_DYNAMO_ENDPOINT" &&
+               curl --silent --output /dev/null "$MESSAGING_SQS_ENDPOINT"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f compose.billing.yml -f compose.messaging.yml ps
+          exit 1
+
+      - name: Billing unit tests
+        run: dotnet test services/Oficina.Billing.Tests --configuration Release --logger trx --results-directory test-results/billing-unit
+
+      - name: Billing DynamoDB integration tests
+        run: dotnet test services/Oficina.Billing.Dynamo.Tests --configuration Release --logger trx --results-directory test-results/billing-dynamo
+
+      - name: Execution unit tests
+        run: dotnet test services/Oficina.Execution.Tests --configuration Release --logger trx --results-directory test-results/execution-unit
+
+      - name: Saga and BDD scenarios
+        run: dotnet test tests/Oficina.Messaging.Local.Tests --configuration Release --logger trx --results-directory test-results/saga
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-local-test-results
+          path: test-results/**/*.trx
+          if-no-files-found: ignore
