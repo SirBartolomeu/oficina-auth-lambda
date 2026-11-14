@@ -13,7 +13,10 @@ using ExecutionOutboxWorker = execution::Oficina.Execution.ExecutionOutboxWorker
 using ExecutionService = execution::Oficina.Execution.ExecutionService;
 using ReserveStockRequestedHandler = execution::Oficina.Execution.ReserveStockRequestedHandler;
 using ReleaseStockRequestedHandler = execution::Oficina.Execution.ReleaseStockRequestedHandler;
+using ConsumeStockRequestedHandler = execution::Oficina.Execution.ConsumeStockRequestedHandler;
+using ExecutionRequestedHandler = execution::Oficina.Execution.ExecutionRequestedHandler;
 using ExecutionDbContext = execution::Oficina.Execution.Persistence.ExecutionDbContext;
+using ReservationStatus = execution::Oficina.Execution.Persistence.ReservationStatus;
 using ExecutionPartSupply = execution::OficinaMvp.Domain.Entities.PartSupply;
 using OficinaMvp.Api.Messaging;
 using OficinaMvp.Application.Contracts;
@@ -27,10 +30,11 @@ namespace Oficina.Messaging.Local.Tests;
 public sealed class StockReservationFlowTests
 {
     [Theory]
-    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment)]
-    [InlineData(4, 1, WorkOrderProcessState.Canceled)]
+    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment, false)]
+    [InlineData(4, 1, WorkOrderProcessState.Canceled, false)]
+    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment, true)]
     public async Task ReservationResultUpdatesOrderWithoutOverselling(
-        int requested, int expectedStock, WorkOrderProcessState expectedState)
+        int requested, int expectedStock, WorkOrderProcessState expectedState, bool paid)
     {
         var endpoint = Environment.GetEnvironmentVariable("MESSAGING_SQS_ENDPOINT")
             ?? throw new InvalidOperationException("Defina MESSAGING_SQS_ENDPOINT para o teste local.");
@@ -91,13 +95,18 @@ public sealed class StockReservationFlowTests
             .AddScoped<ExecutionService>()
             .AddScoped<ReserveStockRequestedHandler>()
             .AddScoped<ReleaseStockRequestedHandler>()
+            .AddScoped<ConsumeStockRequestedHandler>()
+            .AddScoped<ExecutionRequestedHandler>()
             .BuildServiceProvider();
         using var osServices = new ServiceCollection()
             .AddScoped(_ => new WorkshopDbContext(osOptions))
             .AddScoped<BudgetReadyHandler>()
             .AddScoped<StockReservationResultHandler>()
             .AddScoped<PaymentRejectedHandler>()
+            .AddScoped<PaymentConfirmedHandler>()
             .AddScoped<StockReleasedHandler>()
+            .AddScoped<StockConsumedHandler>()
+            .AddScoped<ExecutionStartedHandler>()
             .BuildServiceProvider();
         using var commandsWorker = new ExecutionCommandsWorker(sqs,
             executionServices.GetRequiredService<IServiceScopeFactory>(), settings,
@@ -131,6 +140,68 @@ public sealed class StockReservationFlowTests
             await using var beforeRejection = new WorkshopDbContext(osOptions);
             var pendingOrder = await beforeRejection.WorkOrders.AsNoTracking()
                 .SingleAsync(item => item.Id == order.Id);
+            if (paid)
+            {
+                var confirmed = new IntegrationEnvelope<PaymentConfirmedPayload>(Guid.NewGuid(),
+                    "PaymentConfirmed", 1, order.Id, Guid.NewGuid(), order.Id, order.BranchId,
+                    DateTime.UtcNow, new PaymentConfirmedPayload(
+                        pendingOrder.PaymentAttemptId!.Value, "ORDTEST123", requested * 1000L,
+                        "BRL"));
+                await sqs.SendMessageAsync(osQueue, JsonSerializer.Serialize(confirmed,
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+                using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                {
+                    while (state == WorkOrderProcessState.AwaitingPayment && !timeout.IsCancellationRequested)
+                    {
+                        await using var verify = new WorkshopDbContext(osOptions);
+                        state = (await verify.WorkOrders.SingleAsync(item => item.Id == order.Id)).ProcessState;
+                        if (state == WorkOrderProcessState.AwaitingPayment) await Task.Delay(100);
+                    }
+                }
+                Assert.Equal(WorkOrderProcessState.ReadyForExecution, state);
+                await using (var dispatch = new WorkshopDbContext(osOptions))
+                {
+                    var paymentCommand = await dispatch.OutboxMessages
+                        .SingleAsync(item => item.EventType == "CreatePaymentRequested");
+                    paymentCommand.MarkPublished(DateTime.UtcNow);
+                    await dispatch.SaveChangesAsync();
+                    var sender = new SqsIntegrationMessageSender(sqs,
+                        new Dictionary<string, string> { ["ConsumeStockRequested"] = commandsQueue });
+                    Assert.Equal(1, await new OutboxDispatcher(dispatch, sender,
+                        NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
+                }
+                using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                {
+                    var queued = false;
+                    while (!queued && !timeout.IsCancellationRequested)
+                    {
+                        await using var verify = new WorkshopDbContext(osOptions);
+                        queued = await verify.OutboxMessages.AnyAsync(item =>
+                            item.EventType == "ExecutionRequested");
+                        if (!queued) await Task.Delay(100);
+                    }
+                    Assert.True(queued);
+                }
+                await using (var dispatch = new WorkshopDbContext(osOptions))
+                {
+                    var sender = new SqsIntegrationMessageSender(sqs,
+                        new Dictionary<string, string> { ["ExecutionRequested"] = commandsQueue });
+                    Assert.Equal(1, await new OutboxDispatcher(dispatch, sender,
+                        NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
+                }
+                using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                {
+                    while (state == WorkOrderProcessState.ReadyForExecution && !timeout.IsCancellationRequested)
+                    {
+                        await using var verify = new WorkshopDbContext(osOptions);
+                        state = (await verify.WorkOrders.SingleAsync(item => item.Id == order.Id)).ProcessState;
+                        if (state == WorkOrderProcessState.ReadyForExecution) await Task.Delay(100);
+                    }
+                }
+                Assert.Equal(WorkOrderProcessState.InExecution, state);
+            }
+            else
+            {
             var rejected = new IntegrationEnvelope<PaymentRejectedPayload>(Guid.NewGuid(),
                 "PaymentRejected", 1, order.Id, Guid.NewGuid(), order.Id, order.BranchId,
                 DateTime.UtcNow, new PaymentRejectedPayload(
@@ -168,6 +239,7 @@ public sealed class StockReservationFlowTests
                     if (state == WorkOrderProcessState.ReleasingStock) await Task.Delay(100);
                 }
             }
+            }
         }
         await commandsWorker.StopAsync(CancellationToken.None);
         await executionOutbox.StopAsync(CancellationToken.None);
@@ -175,14 +247,17 @@ public sealed class StockReservationFlowTests
 
         await using var finalOs = new WorkshopDbContext(osOptions);
         await using var finalExecution = new ExecutionDbContext(executionOptions);
-        Assert.Equal(WorkOrderProcessState.Canceled, state);
-        Assert.Equal(expectedStock,
+        Assert.Equal(paid ? WorkOrderProcessState.InExecution : WorkOrderProcessState.Canceled, state);
+        Assert.Equal(paid ? expectedStock - requested : expectedStock,
             (await finalExecution.PartSupplies.SingleAsync(item => item.Id == part.Id)).StockQuantity);
-        Assert.Equal(expectedState == WorkOrderProcessState.AwaitingPayment ? 3 : 1,
+        if (paid)
+            Assert.Equal(ReservationStatus.Consumed,
+                (await finalExecution.StockReservations.SingleAsync()).Status);
+        Assert.Equal(paid ? 4 : expectedState == WorkOrderProcessState.AwaitingPayment ? 3 : 1,
             await finalOs.InboxMessages.CountAsync());
-        Assert.Equal(expectedState == WorkOrderProcessState.AwaitingPayment ? 2 : 1,
+        Assert.Equal(paid ? 3 : expectedState == WorkOrderProcessState.AwaitingPayment ? 2 : 1,
             await finalExecution.InboxMessages.CountAsync());
-        Assert.Equal(expectedState == WorkOrderProcessState.AwaitingPayment ? 2 : 1,
+        Assert.Equal(paid ? 3 : expectedState == WorkOrderProcessState.AwaitingPayment ? 2 : 1,
             await finalExecution.OutboxMessages.CountAsync());
     }
 }

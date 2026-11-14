@@ -37,6 +37,9 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                         else if (eventType == "ConsumeStockRequested")
                             await scope.ServiceProvider.GetRequiredService<ConsumeStockRequestedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType == "ExecutionRequested")
+                            await scope.ServiceProvider.GetRequiredService<ExecutionRequestedHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
                         else
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);

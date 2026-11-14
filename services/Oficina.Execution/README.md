@@ -1,6 +1,6 @@
 # Oficina Execution (extração em andamento)
 
-Serviço independente de catálogo técnico, cotação de serviços/peças e reserva de estoque. Reaproveita as regras `RepairService` e `PartSupply` da solução original, com persistência PostgreSQL própria. A OS consome a cotação HTTP; quando `Messaging:CommandsQueueUrl` está configurado, Execução recebe `ReserveStockRequested`, `ReleaseStockRequested` e `ConsumeStockRequested` por SQS. Reserva, liberação ou consumo, Inbox e resultado na Outbox são gravados na mesma transação SQL. `Messaging:OsEventsQueueUrl` publica `StockReserved`/`StockReservationRejected`/`StockReleased`/`StockConsumed`. A fila de reparos e o deploy Kubernetes ainda não foram concluídos.
+Serviço independente de catálogo técnico, cotação de serviços/peças e reserva de estoque. Reaproveita as regras `RepairService` e `PartSupply` da solução original, com persistência PostgreSQL própria. A OS consome a cotação HTTP; quando `Messaging:CommandsQueueUrl` está configurado, Execução recebe `ReserveStockRequested`, `ReleaseStockRequested`, `ConsumeStockRequested` e `ExecutionRequested` por SQS. Cada comando grava Inbox e resultado na Outbox junto com seus efeitos SQL. `Messaging:OsEventsQueueUrl` publica `StockReserved`/`StockReservationRejected`/`StockReleased`/`StockConsumed`/`ExecutionStarted`. A conclusão/recusa distribuída do reparo e o deploy Kubernetes ainda não foram concluídos.
 
 ## Local
 

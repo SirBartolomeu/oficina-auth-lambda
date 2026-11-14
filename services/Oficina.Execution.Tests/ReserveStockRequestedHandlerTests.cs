@@ -109,4 +109,38 @@ public sealed class ReserveStockRequestedHandlerTests
         await Assert.ThrowsAsync<OficinaMvp.Domain.Exceptions.DomainException>(() =>
             service.ReleaseAsync(reservationId, CancellationToken.None));
     }
+
+    [Fact]
+    public async Task ExecutionRequestRequiresConsumedReservationAndPublishesStarted()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ExecutionDbContext(
+            new DbContextOptionsBuilder<ExecutionDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var orderId = Guid.NewGuid();
+        var reservationId = Guid.NewGuid();
+        var paymentAttemptId = Guid.NewGuid();
+        await new ExecutionService(db).ReserveAsync(new ReserveStockRequest(reservationId,
+            orderId, []), CancellationToken.None);
+        var request = new IntegrationEnvelope<ExecutionRequestedPayload>(Guid.NewGuid(),
+            "ExecutionRequested", 1, orderId, Guid.NewGuid(), orderId, "sp-centro",
+            DateTime.UtcNow, new ExecutionRequestedPayload(orderId, reservationId,
+                paymentAttemptId));
+        var body = JsonSerializer.Serialize(request, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var handler = new ExecutionRequestedHandler(db);
+
+        await Assert.ThrowsAsync<OficinaMvp.Domain.Exceptions.DomainException>(() =>
+            handler.HandleAsync(body, CancellationToken.None));
+        Assert.Empty(await db.InboxMessages.ToListAsync());
+        await new ExecutionService(db).ConsumeAsync(reservationId, CancellationToken.None);
+        Assert.True(await handler.HandleAsync(body, CancellationToken.None));
+        Assert.False(await handler.HandleAsync(body, CancellationToken.None));
+        var started = Assert.Single(await db.OutboxMessages.ToListAsync());
+        Assert.Equal("ExecutionStarted", started.EventType);
+        using var json = JsonDocument.Parse(started.Body);
+        Assert.Equal(paymentAttemptId, json.RootElement.GetProperty("payload")
+            .GetProperty("paymentAttemptId").GetGuid());
+        Assert.Single(await db.InboxMessages.ToListAsync());
+    }
 }

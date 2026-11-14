@@ -27,10 +27,17 @@ public sealed class StockConsumedHandler(WorkshopDbContext dbContext)
         if (order.BranchId != envelope.BranchId ||
             order.ReservationId != envelope.Payload.ReservationId)
             throw new DomainException("Consumo não corresponde à OS.");
-        if (order.ProcessState == WorkOrderProcessState.ReadyForExecution)
-            order.StartExecutionAfterPayment(envelope.OccurredAtUtc);
-        else if (order.ProcessState != WorkOrderProcessState.InExecution)
+        if (order.ProcessState != WorkOrderProcessState.ReadyForExecution ||
+            !order.PaymentAttemptId.HasValue)
             throw new DomainException("OS não está aguardando consumo de estoque.");
+        var requested = new IntegrationEnvelope<ExecutionRequestedPayload>(Guid.NewGuid(),
+            "ExecutionRequested", 1, envelope.CorrelationId, envelope.EventId,
+            order.Id, order.BranchId, DateTime.UtcNow,
+            new ExecutionRequestedPayload(order.Id, order.ReservationId.Value,
+                order.PaymentAttemptId.Value));
+        dbContext.OutboxMessages.Add(new OutboxMessage(requested.EventId,
+            requested.EventType, JsonSerializer.Serialize(requested,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)), requested.OccurredAtUtc));
         dbContext.InboxMessages.Add(new InboxMessage(envelope.EventId, envelope.EventType, DateTime.UtcNow));
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;

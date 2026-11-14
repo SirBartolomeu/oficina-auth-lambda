@@ -10,3 +10,7 @@ public sealed record ReleaseStockRequestedPayload(Guid ReservationId, string Rea
 public sealed record StockReleasedPayload(Guid ReservationId);
 public sealed record ConsumeStockRequestedPayload(Guid ReservationId);
 public sealed record StockConsumedPayload(Guid ReservationId);
+public sealed record ExecutionRequestedPayload(Guid ExecutionId, Guid ReservationId,
+    Guid PaymentAttemptId);
+public sealed record ExecutionStartedPayload(Guid ExecutionId, Guid ReservationId,
+    Guid PaymentAttemptId);
