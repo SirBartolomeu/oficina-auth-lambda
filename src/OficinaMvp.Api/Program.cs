@@ -91,6 +91,7 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
         builder.Services.AddScoped<StockReleasedHandler>();
         builder.Services.AddScoped<StockConsumedHandler>();
         builder.Services.AddScoped<ExecutionStartedHandler>();
+        builder.Services.AddScoped<ExecutionFinishedHandler>();
         builder.Services.AddHostedService<OsEventsSqsWorker>();
     }
 }

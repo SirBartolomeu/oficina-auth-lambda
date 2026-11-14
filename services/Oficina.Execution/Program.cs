@@ -103,6 +103,21 @@ internalApi.MapPost("/stock/reservations/{id:guid}/release", async (Guid id, Exe
     var result = await service.ReleaseAsync(id, ct);
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
+internalApi.MapGet("/executions", async (ExecutionDbContext db, CancellationToken ct) =>
+    await db.StockReservations.AsNoTracking()
+        .Where(item => item.RepairStatus == RepairStatus.Started)
+        .OrderBy(item => item.RepairStartedAtUtc)
+        .Select(item => new { item.WorkOrderId, item.Id, item.RepairStartedAtUtc })
+        .ToListAsync(ct));
+internalApi.MapPost("/executions/{reservationId:guid}/finish", async (
+    Guid reservationId, ExecutionService service, CancellationToken ct) =>
+{
+    var finished = await service.FinishRepairAsync(reservationId, ct);
+    return finished is null ? Results.NotFound() : Results.Ok(new
+    {
+        status = "Finished", published = finished.Value
+    });
+});
 internalApi.MapGet("/catalog/services", async (ExecutionDbContext db, CancellationToken ct) =>
     await db.RepairServices.AsNoTracking().OrderBy(item => item.Name).ToListAsync(ct));
 internalApi.MapGet("/catalog/parts", async (ExecutionDbContext db, CancellationToken ct) =>

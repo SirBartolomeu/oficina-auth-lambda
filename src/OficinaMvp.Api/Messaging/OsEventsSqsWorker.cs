@@ -51,6 +51,9 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                         else if (eventType == "ExecutionStarted")
                             await scope.ServiceProvider.GetRequiredService<ExecutionStartedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType == "ExecutionFinished")
+                            await scope.ServiceProvider.GetRequiredService<ExecutionFinishedHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
                         else
                             throw new InvalidOperationException($"Evento não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);

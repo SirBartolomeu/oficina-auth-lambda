@@ -14,3 +14,5 @@ public sealed record ExecutionRequestedPayload(Guid ExecutionId, Guid Reservatio
     Guid PaymentAttemptId);
 public sealed record ExecutionStartedPayload(Guid ExecutionId, Guid ReservationId,
     Guid PaymentAttemptId);
+public sealed record ExecutionFinishedPayload(Guid ExecutionId, Guid ReservationId,
+    Guid PaymentAttemptId);

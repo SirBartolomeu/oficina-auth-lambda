@@ -129,6 +129,8 @@ public sealed class WorkOrderApplicationService
         var changedAt = DateTime.UtcNow;
         if (action == WorkOrderAction.ApproveBudget && _executionQuoteClient is not null)
             throw new DomainException("A aprovação do orçamento distribuído deve ser registrada no Billing.");
+        if (action == WorkOrderAction.Finalize && _executionQuoteClient is not null)
+            throw new DomainException("A conclusão do reparo distribuído deve ser registrada na Execução.");
         ApplyTransition(workOrder, action, changedAt);
 
         await _repository.SaveChangesAsync(cancellationToken);

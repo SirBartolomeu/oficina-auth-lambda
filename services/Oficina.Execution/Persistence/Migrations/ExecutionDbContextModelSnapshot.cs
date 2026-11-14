@@ -75,6 +75,24 @@ namespace Oficina.Execution.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("BranchId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("PaymentAttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RepairFinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RepairStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RepairStatus")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(24)

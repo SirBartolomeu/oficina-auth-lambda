@@ -22,13 +22,23 @@ public sealed class ExecutionRequestedHandler(ExecutionDbContext db)
             throw new DomainException("Contrato de execução inválido.");
         if (await db.InboxMessages.AnyAsync(item => item.EventId == envelope.EventId,
             cancellationToken)) return false;
-        var reservation = await db.StockReservations.AsNoTracking().SingleOrDefaultAsync(item =>
+        var reservation = await db.StockReservations.SingleOrDefaultAsync(item =>
             item.Id == envelope.Payload.ReservationId, cancellationToken)
             ?? throw new KeyNotFoundException("Reserva da execução não encontrada.");
         if (reservation.WorkOrderId != envelope.WorkOrderId ||
             reservation.Status != ReservationStatus.Consumed)
             throw new DomainException("Execução exige reserva consumida da mesma OS.");
+        if (reservation.RepairStatus == RepairStatus.Finished &&
+            reservation.PaymentAttemptId == envelope.Payload.PaymentAttemptId)
+        {
+            db.InboxMessages.Add(new ExecutionInboxMessage(envelope.EventId,
+                envelope.EventType, DateTime.UtcNow));
+            await db.SaveChangesAsync(cancellationToken);
+            return false;
+        }
         var occurredAt = DateTime.UtcNow;
+        reservation.StartRepair(envelope.Payload.PaymentAttemptId,
+            envelope.BranchId, occurredAt);
         var response = new IntegrationEnvelope<ExecutionStartedPayload>(Guid.NewGuid(),
             "ExecutionStarted", 1, envelope.CorrelationId, envelope.EventId,
             envelope.WorkOrderId, envelope.BranchId, occurredAt,

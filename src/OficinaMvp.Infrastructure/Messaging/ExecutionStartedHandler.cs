@@ -32,7 +32,8 @@ public sealed class ExecutionStartedHandler(WorkshopDbContext dbContext)
             throw new DomainException("Execução não corresponde à OS.");
         if (order.ProcessState == WorkOrderProcessState.ReadyForExecution)
             order.StartExecutionAfterPayment(envelope.OccurredAtUtc);
-        else if (order.ProcessState != WorkOrderProcessState.InExecution)
+        else if (order.ProcessState is not WorkOrderProcessState.InExecution
+                 and not WorkOrderProcessState.Completed)
             throw new DomainException("OS não está aguardando início da execução.");
         dbContext.InboxMessages.Add(new InboxMessage(envelope.EventId,
             envelope.EventType, DateTime.UtcNow));

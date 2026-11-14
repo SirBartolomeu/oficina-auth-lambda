@@ -142,5 +142,21 @@ public sealed class ReserveStockRequestedHandlerTests
         Assert.Equal(paymentAttemptId, json.RootElement.GetProperty("payload")
             .GetProperty("paymentAttemptId").GetGuid());
         Assert.Single(await db.InboxMessages.ToListAsync());
+        var reservation = await db.StockReservations.SingleAsync();
+        Assert.Equal(RepairStatus.Started, reservation.RepairStatus);
+        Assert.Equal(paymentAttemptId, reservation.PaymentAttemptId);
+        Assert.Equal("sp-centro", reservation.BranchId);
+        var service = new ExecutionService(db);
+        Assert.True(await service.FinishRepairAsync(reservationId, CancellationToken.None));
+        Assert.False(await service.FinishRepairAsync(reservationId, CancellationToken.None));
+        Assert.Equal(RepairStatus.Finished, reservation.RepairStatus);
+        var finished = Assert.Single(await db.OutboxMessages
+            .Where(item => item.EventType == "ExecutionFinished").ToListAsync());
+        using var finishedJson = JsonDocument.Parse(finished.Body);
+        Assert.Equal("sp-centro", finishedJson.RootElement.GetProperty("branchId").GetString());
+        var lateDuplicate = request with { EventId = Guid.NewGuid() };
+        Assert.False(await handler.HandleAsync(JsonSerializer.Serialize(lateDuplicate,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)), CancellationToken.None));
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
     }
 }

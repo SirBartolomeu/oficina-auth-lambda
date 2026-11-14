@@ -160,6 +160,20 @@ public sealed class RemoteExecutionQuoteTests
             Assert.Equal(WorkOrderProcessState.InExecution, started.ProcessState);
             Assert.Equal(WorkOrderStatus.InExecution, started.Status);
             Assert.NotNull(started.ExecutionStartedAtUtc);
+            var finishedEvent = new IntegrationEnvelope<ExecutionFinishedPayload>(Guid.NewGuid(),
+                "ExecutionFinished", 1, orderId, Guid.NewGuid(), orderId, null,
+                DateTime.UtcNow, new ExecutionFinishedPayload(orderId,
+                    started.ReservationId!.Value, started.PaymentAttemptId!.Value));
+            var finishedBody = JsonSerializer.Serialize(finishedEvent,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var finishedHandler = new ExecutionFinishedHandler(paymentDb);
+            Assert.True(await finishedHandler.HandleAsync(finishedBody, CancellationToken.None));
+            Assert.False(await finishedHandler.HandleAsync(finishedBody, CancellationToken.None));
+            var finalized = await paymentDb.WorkOrders.AsNoTracking()
+                .SingleAsync(item => item.Id == orderId);
+            Assert.Equal(WorkOrderProcessState.Completed, finalized.ProcessState);
+            Assert.Equal(WorkOrderStatus.Finalized, finalized.Status);
+            Assert.NotNull(finalized.FinalizedAtUtc);
         }
 
         var invalid = ready with { EventId = Guid.NewGuid(),
@@ -167,7 +181,7 @@ public sealed class RemoteExecutionQuoteTests
         await Assert.ThrowsAsync<DomainException>(() => handler.HandleAsync(
             JsonSerializer.Serialize(invalid, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             CancellationToken.None));
-        Assert.Equal(6, await resultDb.InboxMessages.AsNoTracking().CountAsync());
+        Assert.Equal(7, await resultDb.InboxMessages.AsNoTracking().CountAsync());
     }
 
     [Fact]

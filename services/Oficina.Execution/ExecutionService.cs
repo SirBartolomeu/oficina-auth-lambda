@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using Oficina.Execution.Contracts;
 using Oficina.Execution.Persistence;
 using OficinaMvp.Domain.Exceptions;
@@ -106,6 +107,26 @@ public sealed class ExecutionService(ExecutionDbContext db)
         if (saveChanges) await db.SaveChangesAsync(cancellationToken);
         return new ReservationResponse(reservation.Id, reservation.WorkOrderId,
             reservation.Status.ToString());
+    }
+
+    public async Task<bool?> FinishRepairAsync(Guid reservationId,
+        CancellationToken cancellationToken)
+    {
+        var reservation = await db.StockReservations.SingleOrDefaultAsync(item =>
+            item.Id == reservationId, cancellationToken);
+        if (reservation is null) return null;
+        var occurredAt = DateTime.UtcNow;
+        if (!reservation.FinishRepair(occurredAt)) return false;
+        var response = new IntegrationEnvelope<ExecutionFinishedPayload>(Guid.NewGuid(),
+            "ExecutionFinished", 1, reservation.WorkOrderId, Guid.NewGuid(),
+            reservation.WorkOrderId, reservation.BranchId, occurredAt,
+            new ExecutionFinishedPayload(reservation.WorkOrderId, reservation.Id,
+                reservation.PaymentAttemptId!.Value));
+        db.OutboxMessages.Add(new ExecutionOutboxMessage(response.EventId,
+            response.EventType, JsonSerializer.Serialize(response,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)), occurredAt));
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     private static Dictionary<Guid, int> Normalize(IReadOnlyCollection<CatalogItemRequest> items)

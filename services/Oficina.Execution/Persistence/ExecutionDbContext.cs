@@ -51,6 +51,9 @@ public sealed class ExecutionDbContext(DbContextOptions<ExecutionDbContext> opti
             entity.ToTable("stock_reservations");
             entity.HasKey(item => item.Id);
             entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(24);
+            entity.Property(item => item.RepairStatus).HasConversion<string>()
+                .HasMaxLength(24).IsConcurrencyToken();
+            entity.Property(item => item.BranchId).HasMaxLength(64);
             entity.HasIndex(item => item.WorkOrderId);
             entity.HasMany(item => item.Lines).WithOne().HasForeignKey(item => item.ReservationId);
         });
@@ -65,6 +68,7 @@ public sealed class ExecutionDbContext(DbContextOptions<ExecutionDbContext> opti
 }
 
 public enum ReservationStatus { Reserved = 1, Released = 2, Consumed = 3 }
+public enum RepairStatus { Started = 1, Finished = 2 }
 
 public sealed class StockReservation
 {
@@ -80,9 +84,39 @@ public sealed class StockReservation
     public Guid Id { get; private set; }
     public Guid WorkOrderId { get; private set; }
     public ReservationStatus Status { get; private set; }
+    public RepairStatus? RepairStatus { get; private set; }
+    public Guid? PaymentAttemptId { get; private set; }
+    public string? BranchId { get; private set; }
+    public DateTime? RepairStartedAtUtc { get; private set; }
+    public DateTime? RepairFinishedAtUtc { get; private set; }
     public List<StockReservationLine> Lines { get; private set; } = [];
     public void Release() => Status = ReservationStatus.Released;
     public void Consume() => Status = ReservationStatus.Consumed;
+    public void StartRepair(Guid paymentAttemptId, string? branchId, DateTime atUtc)
+    {
+        if (Status != ReservationStatus.Consumed || paymentAttemptId == Guid.Empty)
+            throw new OficinaMvp.Domain.Exceptions.DomainException(
+                "Reparo exige pagamento identificado e reserva consumida.");
+        if (RepairStatus.HasValue)
+        {
+            if (PaymentAttemptId == paymentAttemptId) return;
+            throw new OficinaMvp.Domain.Exceptions.DomainException(
+                "Reserva já vinculada a outro pagamento.");
+        }
+        PaymentAttemptId = paymentAttemptId;
+        BranchId = branchId;
+        RepairStartedAtUtc = atUtc;
+        RepairStatus = Oficina.Execution.Persistence.RepairStatus.Started;
+    }
+    public bool FinishRepair(DateTime atUtc)
+    {
+        if (RepairStatus == Oficina.Execution.Persistence.RepairStatus.Finished) return false;
+        if (RepairStatus != Oficina.Execution.Persistence.RepairStatus.Started)
+            throw new OficinaMvp.Domain.Exceptions.DomainException("Reparo ainda não iniciado.");
+        RepairFinishedAtUtc = atUtc;
+        RepairStatus = Oficina.Execution.Persistence.RepairStatus.Finished;
+        return true;
+    }
 }
 
 public sealed class StockReservationLine
