@@ -27,6 +27,7 @@ builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<IBudgetEventStore>(provider => provider.GetRequiredService<BillingRepository>());
 builder.Services.AddScoped<WorkOrderOpenedHandler>();
 builder.Services.AddScoped<PaymentRequestHandler>();
+builder.Services.AddScoped<RefundRequestHandler>();
 var mercadoPagoToken = builder.Configuration["MercadoPago:AccessToken"];
 var mercadoPagoPos = builder.Configuration["MercadoPago:ExternalPosId"];
 var mercadoPagoWebhookSecret = builder.Configuration["MercadoPago:WebhookSecret"];

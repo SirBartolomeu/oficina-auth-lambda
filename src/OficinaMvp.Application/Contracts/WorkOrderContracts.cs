@@ -96,6 +96,8 @@ public sealed record BudgetDecisionRequest(
     string? Reason,
     DateTime? OccurredAtUtc);
 
+public sealed record RefundDecisionRequest(string Reason);
+
 public sealed record ClientTrackingResponse(
     Guid WorkOrderId,
     string CustomerDocument,

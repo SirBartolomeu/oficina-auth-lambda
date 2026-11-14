@@ -84,7 +84,8 @@ public sealed class WorkshopDbContext : DbContext
             entity.ToTable("work_orders");
             entity.HasKey(order => order.Id);
             entity.Property(order => order.Status).HasConversion<string>().HasMaxLength(40);
-            entity.Property(order => order.ProcessState).HasConversion<string>().HasMaxLength(40);
+            entity.Property(order => order.ProcessState).HasConversion<string>()
+                .HasMaxLength(40).IsConcurrencyToken();
             entity.Property(order => order.Notes).HasMaxLength(500);
             entity.Property(order => order.BranchId).HasMaxLength(64);
             entity.Property(order => order.ServicesTotal).HasPrecision(18, 2);

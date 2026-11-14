@@ -68,6 +68,7 @@ if (!string.IsNullOrWhiteSpace(billingQueueUrl) ||
         var routes = new Dictionary<string, string>();
         if (!string.IsNullOrWhiteSpace(billingQueueUrl)) routes["WorkOrderOpened"] = billingQueueUrl;
         if (!string.IsNullOrWhiteSpace(billingQueueUrl)) routes["CreatePaymentRequested"] = billingQueueUrl;
+        if (!string.IsNullOrWhiteSpace(billingQueueUrl)) routes["RefundPaymentRequested"] = billingQueueUrl;
         if (!string.IsNullOrWhiteSpace(executionCommandsQueueUrl))
             routes["ReserveStockRequested"] = executionCommandsQueueUrl;
         if (!string.IsNullOrWhiteSpace(executionCommandsQueueUrl))
@@ -137,7 +138,8 @@ builder.Services
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+    options.AddPolicy("Admin", policy => policy.RequireRole("Admin")));
 
 builder.Services
     .AddControllers()

@@ -57,6 +57,7 @@ public sealed class WorkOrder
     public int? BudgetVersion { get; private set; }
     public Guid? ReservationId { get; private set; }
     public Guid? PaymentAttemptId { get; private set; }
+    public Guid? RefundRequestId { get; private set; }
     public string Notes { get; private set; } = string.Empty;
     public string? BranchId { get; private set; }
     public decimal ServicesTotal { get; private set; }
@@ -188,6 +189,18 @@ public sealed class WorkOrder
         ProcessState = WorkOrderProcessState.ManualReview;
         RecordProcessNote(changedAtUtc,
             $"Reparo recusado. Revisar estorno e compensação: {NormalizeOptional(reason)}");
+    }
+
+    public void RequestRefundAfterReview(Guid refundRequestId, DateTime changedAtUtc,
+        string reason)
+    {
+        EnsureProcessState(WorkOrderProcessState.ManualReview);
+        if (refundRequestId == Guid.Empty || !PaymentAttemptId.HasValue ||
+            string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 180)
+            throw new DomainException("Solicitação de estorno inválida.");
+        RefundRequestId = refundRequestId;
+        ProcessState = WorkOrderProcessState.RefundRequested;
+        RecordProcessNote(changedAtUtc, $"Estorno solicitado após revisão: {reason.Trim()}");
     }
 
     public void CancelBeforeExecution(DateTime changedAtUtc, string reason)

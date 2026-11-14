@@ -199,9 +199,13 @@ namespace OficinaMvp.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("ProcessState")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
+
+                    b.Property<Guid?>("RefundRequestId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("ReservationId")
                         .HasColumnType("uuid");

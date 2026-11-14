@@ -11,5 +11,6 @@ public enum WorkOrderProcessState
     Completed = 7,
     Canceled = 8,
     ManualReview = 9,
-    ReleasingStock = 10
+    ReleasingStock = 10,
+    RefundRequested = 11
 }

@@ -234,7 +234,83 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         var item = response.Item;
         return new PaymentAttempt(paymentAttemptId, item["status"].S,
             item.TryGetValue("providerOrderId", out var id) ? id.S : null,
-            item.TryGetValue("qrData", out var qr) ? qr.S : null);
+            item.TryGetValue("qrData", out var qr) ? qr.S : null)
+        {
+            RefundRequestId = item.TryGetValue("refundRequestId", out var refundId)
+                ? Guid.Parse(refundId.S) : null,
+            RefundReason = item.TryGetValue("refundReason", out var refundReason)
+                ? refundReason.S : null
+        };
+    }
+
+    public async Task<bool> RecordRefundRequestAsync(Guid refundRequestId,
+        Guid paymentAttemptId, string reason, CancellationToken cancellationToken)
+    {
+        var inbox = InboxKey(refundRequestId);
+        inbox["receivedAtUtc"] = new AttributeValue { S = DateTime.UtcNow.ToString("O") };
+        var pending = PendingRefundKey(paymentAttemptId);
+        pending["refundRequestId"] = new AttributeValue { S = refundRequestId.ToString("D") };
+        pending["requestedAtUtc"] = new AttributeValue { S = DateTime.UtcNow.ToString("O") };
+        try
+        {
+            await dynamo.TransactWriteItemsAsync(new TransactWriteItemsRequest
+            {
+                TransactItems =
+                [
+                    new TransactWriteItem { Update = new Update
+                    {
+                        TableName = _table, Key = PaymentKey(paymentAttemptId),
+                        ConditionExpression = "#status = :confirmed AND attribute_exists(providerOrderId) AND attribute_not_exists(refundRequestId)",
+                        UpdateExpression = "SET #status = :requested, refundRequestId = :refundId, refundReason = :reason",
+                        ExpressionAttributeNames = new Dictionary<string, string> { ["#status"] = "status" },
+                        ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                        {
+                            [":confirmed"] = new() { S = "Confirmed" },
+                            [":requested"] = new() { S = "RefundRequested" },
+                            [":refundId"] = new() { S = refundRequestId.ToString("D") },
+                            [":reason"] = new() { S = reason }
+                        }
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = inbox,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } },
+                    new TransactWriteItem { Put = new Put
+                    {
+                        TableName = _table, Item = pending,
+                        ConditionExpression = "attribute_not_exists(pk)"
+                    } }
+                ]
+            }, cancellationToken);
+            return true;
+        }
+        catch (TransactionCanceledException)
+        {
+            var current = await GetPaymentAttemptAsync(paymentAttemptId, cancellationToken);
+            if (current?.Status == "RefundRequested" &&
+                current.RefundRequestId == refundRequestId &&
+                current.RefundReason == reason) return false;
+            throw new InvalidOperationException("Conflito ao solicitar estorno.");
+        }
+    }
+
+    public async Task<IReadOnlyCollection<Guid>> GetPendingRefundsAsync(
+        CancellationToken cancellationToken)
+    {
+        var response = await dynamo.QueryAsync(new QueryRequest
+        {
+            TableName = _table,
+            KeyConditionExpression = "pk = :pk",
+            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+            {
+                [":pk"] = new() { S = "REFUND#PENDING" }
+            },
+            Limit = 10,
+            ConsistentRead = true
+        }, cancellationToken);
+        return (response.Items ?? []).Select(item => Guid.ParseExact(item["sk"].S,
+            "N")).ToArray();
     }
 
     public async Task<bool> CompletePaymentCreationAsync(Guid paymentAttemptId,
@@ -513,6 +589,12 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
     private static Dictionary<string, AttributeValue> PendingPaymentKey(Guid paymentAttemptId) => new()
     {
         ["pk"] = new() { S = "PAYMENT#PENDING" },
+        ["sk"] = new() { S = paymentAttemptId.ToString("N") }
+    };
+
+    private static Dictionary<string, AttributeValue> PendingRefundKey(Guid paymentAttemptId) => new()
+    {
+        ["pk"] = new() { S = "REFUND#PENDING" },
         ["sk"] = new() { S = paymentAttemptId.ToString("N") }
     };
 

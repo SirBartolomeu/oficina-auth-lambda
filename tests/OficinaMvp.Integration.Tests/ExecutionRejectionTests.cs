@@ -2,10 +2,13 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using OficinaMvp.Application.Contracts;
+using OficinaMvp.Application.Ports;
+using OficinaMvp.Application.Services;
 using OficinaMvp.Domain.Entities;
 using OficinaMvp.Domain.Exceptions;
 using OficinaMvp.Infrastructure.Messaging;
 using OficinaMvp.Infrastructure.Persistence;
+using OficinaMvp.Infrastructure.Persistence.Repositories;
 
 namespace OficinaMvp.Integration.Tests;
 
@@ -52,5 +55,35 @@ public sealed class ExecutionRejectionTests
         Assert.Null(order.FinalizedAtUtc);
         Assert.Throws<DomainException>(() => order.Finalize(DateTime.UtcNow));
         Assert.Single(await db.InboxMessages.ToListAsync());
+
+        var application = new WorkOrderApplicationService(new EfWorkshopRepository(db),
+            new NoOpNotifier(), new EfIntegrationOutbox(db), new NoOpQuoteClient());
+        var requested = await application.RequestRefundAsync(order.Id,
+            "Serviço não realizado", CancellationToken.None);
+        Assert.Equal(WorkOrderProcessState.RefundRequested, requested.ProcessState);
+        Assert.NotNull(requested.RefundRequestId);
+        await application.RequestRefundAsync(order.Id, "Serviço não realizado",
+            CancellationToken.None);
+        var refund = Assert.Single(await db.OutboxMessages.ToListAsync());
+        Assert.Equal("RefundPaymentRequested", refund.EventType);
+        using var refundBody = JsonDocument.Parse(refund.PayloadJson);
+        Assert.Equal(requested.RefundRequestId,
+            refundBody.RootElement.GetProperty("payload").GetProperty("refundRequestId").GetGuid());
+        Assert.Equal(paymentId,
+            refundBody.RootElement.GetProperty("payload").GetProperty("paymentAttemptId").GetGuid());
+    }
+
+    private sealed class NoOpNotifier : IWorkOrderStatusNotifier
+    {
+        public Task NotifyAsync(WorkOrderStatusNotification notification,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class NoOpQuoteClient : IExecutionQuoteClient
+    {
+        public Task<ExecutionQuoteResponse> QuoteAsync(
+            IReadOnlyCollection<RequestedService> services,
+            IReadOnlyCollection<RequestedPart> parts, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

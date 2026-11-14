@@ -37,6 +37,9 @@ public sealed class BillingSqsWorker(
                         else if (eventType == "CreatePaymentRequested")
                             await scope.ServiceProvider.GetRequiredService<PaymentRequestHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                        else if (eventType == "RefundPaymentRequested")
+                            await scope.ServiceProvider.GetRequiredService<RefundRequestHandler>()
+                                .HandleAsync(message.Body, stoppingToken);
                         else
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);

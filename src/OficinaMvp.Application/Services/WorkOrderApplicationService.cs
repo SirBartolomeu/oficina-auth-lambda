@@ -138,6 +138,27 @@ public sealed class WorkOrderApplicationService
         return await GetRequiredByIdAsync(id, cancellationToken);
     }
 
+    public async Task<WorkOrder> RequestRefundAsync(Guid id, string reason,
+        CancellationToken cancellationToken)
+    {
+        if (_executionQuoteClient is null)
+            throw new DomainException("Estorno distribuído exige Billing e Execução configurados.");
+        var workOrder = await _repository.GetWorkOrderByIdAsync(id, trackChanges: true,
+            cancellationToken) ?? throw new KeyNotFoundException("Ordem de serviço não encontrada.");
+        if (workOrder.ProcessState == WorkOrderProcessState.RefundRequested)
+            return await GetRequiredByIdAsync(id, cancellationToken);
+        var refundRequestId = Guid.NewGuid();
+        var occurredAt = DateTime.UtcNow;
+        workOrder.RequestRefundAfterReview(refundRequestId, occurredAt, reason);
+        _outbox.Enqueue(new IntegrationEnvelope<RefundPaymentRequestedPayload>(
+            refundRequestId, "RefundPaymentRequested", 1, workOrder.Id, Guid.NewGuid(),
+            workOrder.Id, workOrder.BranchId, occurredAt,
+            new RefundPaymentRequestedPayload(workOrder.PaymentAttemptId!.Value,
+                refundRequestId, reason.Trim())));
+        await _repository.SaveChangesAsync(cancellationToken);
+        return await GetRequiredByIdAsync(id, cancellationToken);
+    }
+
     public async Task<WorkOrder> ApplyBudgetDecisionAsync(Guid id, BudgetDecisionRequest request, CancellationToken cancellationToken)
     {
         var workOrder = await _repository.GetWorkOrderByIdAsync(id, trackChanges: true, cancellationToken);
