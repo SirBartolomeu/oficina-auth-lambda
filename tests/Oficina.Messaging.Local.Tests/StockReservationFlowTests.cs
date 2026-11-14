@@ -30,11 +30,13 @@ namespace Oficina.Messaging.Local.Tests;
 public sealed class StockReservationFlowTests
 {
     [Theory]
-    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment, false)]
-    [InlineData(4, 1, WorkOrderProcessState.Canceled, false)]
-    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment, true)]
+    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment, false, "expired")]
+    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment, false, "canceled")]
+    [InlineData(4, 1, WorkOrderProcessState.Canceled, false, "expired")]
+    [InlineData(2, 3, WorkOrderProcessState.AwaitingPayment, true, "expired")]
     public async Task ReservationResultUpdatesOrderWithoutOverselling(
-        int requested, int expectedStock, WorkOrderProcessState expectedState, bool paid)
+        int requested, int expectedStock, WorkOrderProcessState expectedState, bool paid,
+        string rejectionReason)
     {
         var endpoint = Environment.GetEnvironmentVariable("MESSAGING_SQS_ENDPOINT")
             ?? throw new InvalidOperationException("Defina MESSAGING_SQS_ENDPOINT para o teste local.");
@@ -206,7 +208,7 @@ public sealed class StockReservationFlowTests
                 "PaymentRejected", 1, order.Id, Guid.NewGuid(), order.Id, order.BranchId,
                 DateTime.UtcNow, new PaymentRejectedPayload(
                     pendingOrder.PaymentAttemptId!.Value, "ORDTEST123", requested * 1000L,
-                    "BRL", "expired"));
+                    "BRL", rejectionReason));
             await sqs.SendMessageAsync(osQueue, JsonSerializer.Serialize(rejected,
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)));
             using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
