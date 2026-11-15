@@ -24,6 +24,7 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
+                    var started = Stopwatch.GetTimestamp();
                     string? eventId = null;
                     string? correlationId = null;
                     try
@@ -63,11 +64,13 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         if (applied) ExecutionMetrics.RecordAppliedCommand(eventType);
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
+                        ExecutionMetrics.RecordSqsProcessed(eventType, Stopwatch.GetElapsedTime(started).TotalSeconds);
                         logger.LogInformation("Comando {EventType} processado na Execução", eventType);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
                     catch (Exception error)
                     {
+                        ExecutionMetrics.RecordSqsMessageFailure();
                         logger.LogWarning(error,
                             "Falha ao consumir comando {MessageId} {EventId} {CorrelationId} na Execução",
                             message.MessageId, eventId, correlationId);
@@ -77,6 +80,7 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception error)
             {
+                ExecutionMetrics.RecordSqsReceiveFailure();
                 logger.LogError(error, "Falha ao receber comandos de Execução");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }

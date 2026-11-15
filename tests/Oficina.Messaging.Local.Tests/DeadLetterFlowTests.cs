@@ -1,6 +1,7 @@
 extern alias execution;
 
 using System.Text.Json;
+using System.Diagnostics.Metrics;
 using Amazon.Runtime;
 using Amazon.SQS;
 using Amazon.SQS.Model;
@@ -23,6 +24,23 @@ public sealed class DeadLetterFlowTests
     [InlineData("execution")]
     public async Task InvalidMessageMovesToDeadLetterQueue(string consumer)
     {
+        var meterName = consumer switch
+        {
+            "os" => "Oficina.WorkOrders",
+            "billing" => "Oficina.Billing.Business",
+            _ => "Oficina.Execution.Business"
+        };
+        long failures = 0;
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == meterName && instrument.Name == "sqs_message_failures")
+                    listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref failures, value));
+        meterListener.Start();
         var endpoint = Environment.GetEnvironmentVariable("MESSAGING_SQS_ENDPOINT")
             ?? throw new InvalidOperationException("Defina MESSAGING_SQS_ENDPOINT para o teste local.");
         using var sqs = new AmazonSQSClient(new BasicAWSCredentials("local", "local"),
@@ -81,5 +99,6 @@ public sealed class DeadLetterFlowTests
         await worker.StopAsync(CancellationToken.None);
         Assert.NotNull(deadLetter);
         Assert.Equal("{\"eventType\":\"Unknown\"}", deadLetter.Body);
+        Assert.True(Volatile.Read(ref failures) >= 2);
     }
 }

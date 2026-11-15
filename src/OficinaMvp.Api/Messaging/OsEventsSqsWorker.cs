@@ -25,6 +25,7 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
+                    var started = Stopwatch.GetTimestamp();
                     string? eventId = null;
                     string? correlationId = null;
                     try
@@ -85,6 +86,7 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                             throw new InvalidOperationException($"Evento não suportado: {eventType}");
                         if (changed) WorkOrderMetrics.RecordSagaTransition(eventType);
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
+                        WorkOrderMetrics.RecordSqsProcessed(eventType, Stopwatch.GetElapsedTime(started).TotalSeconds);
                         logger.LogInformation("Evento {EventType} processado na OS", eventType);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -93,6 +95,7 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                     }
                     catch (Exception error)
                     {
+                        WorkOrderMetrics.RecordSqsMessageFailure();
                         logger.LogWarning(error,
                             "Falha ao consumir evento {MessageId} {EventId} {CorrelationId} na OS",
                             message.MessageId, eventId, correlationId);
@@ -105,6 +108,7 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
             }
             catch (Exception error)
             {
+                WorkOrderMetrics.RecordSqsReceiveFailure();
                 logger.LogError(error, "Falha ao receber eventos SQS na OS");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }

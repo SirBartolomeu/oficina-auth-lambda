@@ -28,6 +28,7 @@ public sealed class BillingSqsWorker(
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
+                    var started = Stopwatch.GetTimestamp();
                     string? eventId = null;
                     string? correlationId = null;
                     try
@@ -68,6 +69,7 @@ public sealed class BillingSqsWorker(
                         else
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
+                        BillingMetrics.RecordSqsProcessed(eventType, Stopwatch.GetElapsedTime(started).TotalSeconds);
                         logger.LogInformation("Comando {EventType} processado no Billing", eventType);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -76,6 +78,7 @@ public sealed class BillingSqsWorker(
                     }
                     catch (Exception error)
                     {
+                        BillingMetrics.RecordSqsMessageFailure();
                         logger.LogWarning(error,
                             "Falha ao consumir mensagem {MessageId} {EventId} {CorrelationId} no Billing",
                             message.MessageId, eventId, correlationId);
@@ -88,6 +91,7 @@ public sealed class BillingSqsWorker(
             }
             catch (Exception error)
             {
+                BillingMetrics.RecordSqsReceiveFailure();
                 logger.LogError(error, "Falha ao receber mensagens SQS no Billing");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
