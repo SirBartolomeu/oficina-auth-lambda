@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - serviceaccounts.yaml
   - os.yaml
+  - auth-lookup-nodeport.yaml
   - execution.yaml
   - billing.yaml
   - hpa.yaml

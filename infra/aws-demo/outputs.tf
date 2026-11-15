@@ -72,3 +72,13 @@ output "aws_region" {
   description = "Região única usada pelo bootstrap."
   value       = var.aws_region
 }
+
+output "auth_lambda_name" {
+  description = "Function de CPF; bootstrap de ambiente deve injetar JWT e token de consulta antes do primeiro uso."
+  value       = aws_lambda_function.auth.function_name
+}
+
+output "auth_token_url" {
+  description = "URL publica do POST /auth/token da HTTP API."
+  value       = "${aws_apigatewayv2_api.auth.api_endpoint}/auth/token"
+}

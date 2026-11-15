@@ -8,7 +8,7 @@ $expected = @{
     ServiceAccount = 3
     ConfigMap = 3
     Deployment = 3
-    Service = 3
+    Service = 4
     HorizontalPodAutoscaler = 3
 }
 foreach ($kind in $expected.Keys) {
@@ -27,4 +27,4 @@ if ($rendered -match 'REPLACE_RDS_HOST|REPLACE_MERCADO_PAGO_TEST_ACCESS_TOKEN') 
     throw 'Secret de exemplo não deve ser incluído no Kustomize.'
 }
 
-'Kustomize: 16 recursos (3 Deployments, Services, ConfigMaps, ServiceAccounts e HPAs).'
+'Kustomize: 17 recursos (3 Deployments, 4 Services, 3 ConfigMaps, 3 ServiceAccounts e 3 HPAs).'

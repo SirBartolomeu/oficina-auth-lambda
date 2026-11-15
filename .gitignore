@@ -37,6 +37,7 @@ terraform.tfstate.backup
 *.tfvars
 !*.tfvars.example
 infra/aws-demo/backend.hcl
+infra/aws-demo/artifacts/
 .env
 .env.*
 

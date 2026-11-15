@@ -33,6 +33,13 @@ def main():
         "username": admin_user, "password": admin_password
     })
     token = token_response["accessToken"]
+    admin_headers = {"Authorization": "Bearer " + token}
+    customers, _ = request("GET", os_url + "/api/customers", headers=admin_headers)
+    if not any(customer.get("document") == "52998224725" for customer in customers):
+        request("POST", os_url + "/api/customers", {
+            "name": "Cliente Demo AWS", "document": "52998224725",
+            "phone": None, "email": None
+        }, admin_headers)
     service, _ = request("POST", execution_url + "/internal/catalog/services", {
         "name": "Demo AWS " + uuid.uuid4().hex[:8],
         "description": "Validacao distribuida",
@@ -45,7 +52,7 @@ def main():
         "services": [{"serviceId": service["id"], "quantity": 1}],
         "parts": [],
         "branchId": "sp-centro",
-    }, {"Authorization": "Bearer " + token})
+    }, admin_headers)
     order_id = order["id"]
     trace_id = response_headers.get("X-Trace-Id", "")
     if not re.fullmatch(r"[0-9a-f]{32}", trace_id):
@@ -53,8 +60,15 @@ def main():
 
     for _ in range(45):
         current, _ = request("GET", os_url + "/api/work-orders/" + order_id,
-                             headers={"Authorization": "Bearer " + token})
+                             headers=admin_headers)
         if current.get("processState") == "AwaitingApproval":
+            auth_url = os.environ.get("OFICINA_AUTH_URL")
+            if auth_url:
+                client, _ = request("POST", auth_url, {"cpf": "52998224725"})
+                tracking, _ = request("GET", os_url + "/api/client/work-orders/" + order_id,
+                                      headers={"Authorization": "Bearer " + client["accessToken"]})
+                if tracking.get("workOrderId") != order_id:
+                    raise RuntimeError("Client JWT did not return the created work order")
             print(f"OS={order_id} status=AwaitingApproval trace={trace_id}")
             return
         time.sleep(2)

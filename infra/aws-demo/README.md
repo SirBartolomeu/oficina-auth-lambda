@@ -8,6 +8,8 @@ Na janela da demo, `scripts/aws-demo/prepare-workload-credentials.sh` obtém cre
 
 O Terraform também cria três entradas vazias no Secrets Manager. `scripts/aws-demo/bootstrap-rds-and-app-secrets.sh` cria os databases e usuários `oficina_os`/`oficina_execution`, grava senhas e tokens fora do Terraform state e prepara os Secrets Kubernetes de aplicação. O nó K3s pode ler o segredo mestre gerenciado pelo RDS e gravar apenas essas três entradas; a role do Billing continua sem acesso a segredos. A criação dos bancos e a distribuição de credenciais ainda não foram executadas em EC2 real.
 
+A autenticação de cliente usa a Function .NET 10 `Oficina.Auth` em Lambda, exposta apenas em `POST /auth/token` por HTTP API com throttling. A Function entra nas subnets privadas e acessa a OS pelo NodePort 30080, permitido somente do security group da Lambda. Execute `scripts/aws-demo/build-auth-lambda.ps1` **antes** do `terraform plan`; o ZIP fica ignorado pelo Git. A Lambda lê o segredo da OS em runtime por um endpoint privado do Secrets Manager em uma AZ, permitido somente do seu security group. O Terraform guarda apenas o ARN e não grava chave JWT ou token de consulta no state. O endpoint gera custo horário até o `destroy` autorizado. Sem o bootstrap do segredo da OS, a rota retorna indisponibilidade; a Function mantém o segredo em memória na instância aquecida, então a rotação exige reciclar as instâncias da Lambda. Não há NAT.
+
 Três documentos SSM de deploy recebem somente um SHA Git válido, atualizam a imagem do Deployment correspondente e verificam o rollout. Cada role OIDC pode executar apenas seu documento no nó K3s e consultar o resultado. Os workflows de CI chamam esses documentos após publicar ECR. Para o primeiro deploy, um bucket S3 privado recebe um pacote curto de scripts/manifests (objetos expiram em dois dias); a role do nó pode somente ler `demo/*`. `scripts/aws-demo/package-deployment.ps1` gera o pacote a partir dos outputs do Terraform. Após o upload e conferência do SHA256, `initial-deploy.sh` prepara RDS/Secrets e injeta região, tabela, URLs SQS e imagens ECR publicadas no Kustomize antes de aplicar.
 
 Ainda faltam criar o bucket de estado autorizado, inicializar o backend remoto e executar upload/deploy/smoke reais; scripts e K3s não foram testados em EC2. **Não executar `apply`** antes do plan revisado e da autorização; nenhum recurso AWS foi criado.
@@ -18,6 +20,7 @@ O backend S3 está declarado, mas depende de um bucket privado criado fora deste
 terraform -chdir=infra/aws-demo fmt -check
 terraform -chdir=infra/aws-demo init -backend=false
 terraform -chdir=infra/aws-demo validate
+./scripts/aws-demo/build-auth-lambda.ps1
 terraform -chdir=infra/aws-demo init -backend-config=backend.hcl
 terraform -chdir=infra/aws-demo plan -var='aws_region=REGIAO_ESCOLHIDA' -var='github_owner=SEU_OWNER'
 ```

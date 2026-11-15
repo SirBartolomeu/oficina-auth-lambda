@@ -46,4 +46,10 @@ done
 
 export OFICINA_OS_URL='http://127.0.0.1:18080'
 export OFICINA_EXECUTION_URL='http://127.0.0.1:18081'
+export OFICINA_AUTH_URL="$(python3 - "$root/deployment-config.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding='utf-8-sig') as source:
+    print(json.load(source)['authTokenUrl'])
+PY
+)"
 python3 "$root/scripts/aws-demo/verify-flow.py"
