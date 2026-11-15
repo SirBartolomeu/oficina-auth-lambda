@@ -47,3 +47,8 @@ output "github_ecr_push_role_arns" {
   description = "Configurar cada ARN como variável do workflow GitHub correspondente."
   value       = { for name, role in aws_iam_role.github_push : name => role.arn }
 }
+
+output "workload_role_arns" {
+  description = "Roles temporárias distintas para OS, Execução e Billing no K3s."
+  value       = { for name, role in aws_iam_role.workload : name => role.arn }
+}

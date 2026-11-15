@@ -20,6 +20,8 @@ spec:
         app.kubernetes.io/name: billing-api
     spec:
       serviceAccountName: oficina-billing
+      imagePullSecrets:
+        - name: oficina-ecr-pull
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
       securityContext:
@@ -38,6 +40,8 @@ spec:
                 name: oficina-billing-config
             - secretRef:
                 name: oficina-billing-secret
+            - secretRef:
+                name: oficina-billing-aws-temporary
           startupProbe:
             httpGet:
               path: /health/live

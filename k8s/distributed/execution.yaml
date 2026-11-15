@@ -20,6 +20,8 @@ spec:
         app.kubernetes.io/name: execution-api
     spec:
       serviceAccountName: oficina-execution
+      imagePullSecrets:
+        - name: oficina-ecr-pull
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
       securityContext:
@@ -38,6 +40,8 @@ spec:
                 name: oficina-execution-config
             - secretRef:
                 name: oficina-execution-secret
+            - secretRef:
+                name: oficina-execution-aws-temporary
           startupProbe:
             httpGet:
               path: /health/live
