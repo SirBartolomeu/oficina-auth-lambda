@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -19,6 +20,13 @@ using OficinaMvp.Infrastructure.Persistence.Repositories;
 using OficinaMvp.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole(options =>
+{
+    options.IncludeScopes = true;
+    options.UseUtcTimestamp = true;
+    options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
+});
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<AdminCredentialsOptions>(builder.Configuration.GetSection("AdminCredentials"));
@@ -182,6 +190,24 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    var traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
+    using var scope = app.Logger.BeginScope(new Dictionary<string, object>
+    {
+        ["traceId"] = traceId,
+        ["requestId"] = context.TraceIdentifier
+    });
+    context.Response.Headers["X-Trace-Id"] = traceId;
+    var startedAt = Stopwatch.GetTimestamp();
+    await next();
+    if (!context.Request.Path.StartsWithSegments("/health"))
+        app.Logger.LogInformation("HTTP {Method} {StatusCode} {Endpoint} {ElapsedMs}",
+            context.Request.Method, context.Response.StatusCode,
+            context.GetEndpoint()?.DisplayName ?? "unmatched",
+            Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+});
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
