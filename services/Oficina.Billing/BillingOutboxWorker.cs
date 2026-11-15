@@ -18,30 +18,18 @@ public sealed class BillingOutboxWorker(IAmazonSQS sqs, IServiceScopeFactory sco
             {
                 using var scope = scopes.CreateScope();
                 var repository = scope.ServiceProvider.GetRequiredService<BillingRepository>();
-                var pending = await repository.GetPendingOutboxAsync(stoppingToken);
-                foreach (var item in pending)
+                var dispatcher = new BillingOutboxDispatcher(repository, async (item, ct) =>
                 {
-                    try
+                    var request = new SendMessageRequest { QueueUrl = queueUrl, MessageBody = item.Body };
+                    if (queueUrl.EndsWith(".fifo", StringComparison.OrdinalIgnoreCase))
                     {
-                        var request = new SendMessageRequest { QueueUrl = queueUrl, MessageBody = item.Body };
-                        if (queueUrl.EndsWith(".fifo", StringComparison.OrdinalIgnoreCase))
-                        {
-                            using var body = JsonDocument.Parse(item.Body);
-                            request.MessageGroupId = body.RootElement.GetProperty("workOrderId").GetString();
-                            request.MessageDeduplicationId = item.EventId.ToString("N");
-                        }
-                        await sqs.SendMessageAsync(request, stoppingToken);
-                        await repository.MarkOutboxPublishedAsync(item.EventId, stoppingToken);
+                        using var body = JsonDocument.Parse(item.Body);
+                        request.MessageGroupId = body.RootElement.GetProperty("workOrderId").GetString();
+                        request.MessageDeduplicationId = item.EventId.ToString("N");
                     }
-                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    catch (Exception error)
-                    {
-                        logger.LogWarning(error, "Falha ao publicar BudgetReady {EventId}", item.EventId);
-                    }
-                }
+                    await sqs.SendMessageAsync(request, ct);
+                }, logger);
+                await dispatcher.DispatchBatchAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

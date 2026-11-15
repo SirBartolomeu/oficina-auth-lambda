@@ -125,6 +125,60 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             Key = OutboxKey(eventId)
         }, cancellationToken);
 
+    public async Task<Guid?> TryClaimOutboxAsync(Guid eventId, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var claimId = Guid.NewGuid();
+        try
+        {
+            await dynamo.UpdateItemAsync(new UpdateItemRequest
+            {
+                TableName = _table,
+                Key = OutboxKey(eventId),
+                ConditionExpression = "attribute_exists(pk) AND (attribute_not_exists(leaseUntil) OR leaseUntil < :now)",
+                UpdateExpression = "SET leaseOwner = :owner, leaseUntil = :until",
+                ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                {
+                    [":now"] = new() { N = now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture) },
+                    [":until"] = new() { N = now.AddMinutes(2).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture) },
+                    [":owner"] = new() { S = claimId.ToString("N") }
+                }
+            }, cancellationToken);
+            return claimId;
+        }
+        catch (ConditionalCheckFailedException)
+        {
+            return null;
+        }
+    }
+
+    public Task MarkClaimedOutboxPublishedAsync(Guid eventId, Guid claimId,
+        CancellationToken cancellationToken) =>
+        dynamo.DeleteItemAsync(new DeleteItemRequest
+        {
+            TableName = _table,
+            Key = OutboxKey(eventId),
+            ConditionExpression = "leaseOwner = :owner",
+            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+            {
+                [":owner"] = new() { S = claimId.ToString("N") }
+            }
+        }, cancellationToken);
+
+    public Task ReleaseOutboxClaimAsync(Guid eventId, Guid claimId,
+        CancellationToken cancellationToken) =>
+        dynamo.UpdateItemAsync(new UpdateItemRequest
+        {
+            TableName = _table,
+            Key = OutboxKey(eventId),
+            ConditionExpression = "leaseOwner = :owner",
+            UpdateExpression = "REMOVE leaseOwner, leaseUntil",
+            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+            {
+                [":owner"] = new() { S = claimId.ToString("N") }
+            }
+        }, cancellationToken);
+
     public async Task<Budget?> GetAsync(Guid workOrderId, int version, CancellationToken cancellationToken)
     {
         var response = await dynamo.GetItemAsync(new GetItemRequest
