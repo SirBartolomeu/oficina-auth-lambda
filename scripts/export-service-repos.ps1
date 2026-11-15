@@ -25,7 +25,7 @@ if (-not (Test-Path -LiteralPath $exportRoot)) { New-Item -ItemType Directory -P
 foreach ($service in $services.Keys) {
     $target = Join-Path $exportRoot $service
     if (Test-Path -LiteralPath $target) { throw "Destino já existe: $target. Não será sobrescrito." }
-    & git clone --no-hardlinks --single-branch --branch $branch -- $repoRoot $target
+    & git clone --quiet --no-hardlinks --single-branch --branch $branch -- $repoRoot $target
     if ($LASTEXITCODE -ne 0) { throw "Falha ao clonar $service." }
 
     & git -C $target branch -M main
@@ -65,7 +65,7 @@ foreach ($service in $services.Keys) {
 
     & git -C $target add -A
     if ($LASTEXITCODE -ne 0) { throw "Falha ao preparar o commit de $service." }
-    & git -C $target commit -m "Isola $service em repositorio independente"
+    & git -C $target commit --quiet -m "Isola $service em repositorio independente"
     if ($LASTEXITCODE -ne 0) { throw "Falha ao registrar o commit de $service." }
     "Preparado: $target"
 }
