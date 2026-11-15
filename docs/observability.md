@@ -20,4 +20,8 @@ Os publicadores OS, Execução e Billing criam uma atividade W3C e enviam seu `t
 
 A OS grava `traceparent` como metadado opcional no JSON da Outbox, na mesma transação da OS. O dispatcher retoma esse contexto antes de publicar na SQS. Um teste salvou a Outbox em SQLite, encerrou a atividade da requisição, releu o registro e confirmou no ElasticMQ o mesmo trace ID; os 12 testes locais de mensageria e os 23 testes de integração da OS passaram. O campo extra não altera os campos obrigatórios do contrato de evento.
 
-Execução e Billing ainda iniciam um novo trace ao publicar suas Outboxes em segundo plano. Portanto, o trace completo da OS até o fim da Saga **ainda não** está implementado. Faltam persistir o contexto nas duas Outboxes, exportar spans e métricas, correlacionar a Lambda, dashboards e alertas. O custo de logs na AWS dependerá de volume e retenção; configurar retenção curta e limites antes do deploy.
+## Quinto incremento: Outboxes da Execução e Billing
+
+Execução grava o metadado `traceparent` no corpo da Outbox SQL; Billing o grava no corpo da Outbox DynamoDB dentro da transação de estado + mensagem. Os publicadores retomam esse contexto ao enviar pela SQS. Testes de persistência passaram nos dois bancos locais (11 testes Execução, 13 DynamoDB Billing); os 12 testes da Saga passaram. Um teste do fluxo OS→Billing confirmou que a Outbox do Billing manteve o trace ID iniciado na OS.
+
+O contexto W3C agora atravessa as três Outboxes e a SQS, mas ainda faltam um exportador de spans/métricas, amostragem, correlação da Lambda, dashboards e alertas para demonstrar um trace distribuído. As atividades atuais usam `System.Diagnostics.Activity` sem coletor. O custo de logs na AWS dependerá de volume e retenção; configurar retenção curta e limites antes do deploy.

@@ -1,6 +1,7 @@
 extern alias execution;
 
 using System.Net;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Amazon.DynamoDBv2;
@@ -83,8 +84,13 @@ public sealed class OpenedEventFlowTests
         await using (var executionSetup = new ExecutionDbContext(executionOptions))
             await executionSetup.Database.EnsureCreatedAsync();
         db.AddRange(customer, vehicle, order);
-        db.OutboxMessages.Add(new OutboxMessage(eventId, "WorkOrderOpened", json, DateTime.UtcNow));
-        await db.SaveChangesAsync();
+        ActivityTraceId originTraceId;
+        using (var request = new Activity("open order").SetIdFormat(ActivityIdFormat.W3C).Start())
+        {
+            originTraceId = request.TraceId;
+            db.OutboxMessages.Add(new OutboxMessage(eventId, "WorkOrderOpened", json, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
 
         var senderWithFailure = new AckLostOnceSender(new SqsIntegrationMessageSender(sqs, queueUrl));
         var clock = new ManualTimeProvider();
@@ -132,6 +138,12 @@ public sealed class OpenedEventFlowTests
         Assert.NotNull(budget);
         var duplicate = await new WorkOrderOpenedHandler(repository).HandleAsync(json, CancellationToken.None);
         var ready = Assert.Single(await repository.GetPendingOutboxAsync(CancellationToken.None));
+        using (var readyBody = JsonDocument.Parse(ready.Body))
+        {
+            var parent = readyBody.RootElement.GetProperty("traceparent").GetString();
+            Assert.True(ActivityContext.TryParse(parent, null, out var context));
+            Assert.Equal(originTraceId, context.TraceId);
+        }
 
         using var osServices = new ServiceCollection()
             .AddScoped(_ => new WorkshopDbContext(dbOptions))

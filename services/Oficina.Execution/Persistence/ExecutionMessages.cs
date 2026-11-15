@@ -1,3 +1,5 @@
+using Oficina.Execution;
+
 namespace Oficina.Execution.Persistence;
 
 public sealed class ExecutionInboxMessage
@@ -21,7 +23,7 @@ public sealed class ExecutionOutboxMessage
     {
         EventId = eventId;
         EventType = eventType;
-        Body = body;
+        Body = SqsTraceContext.Stamp(body);
         OccurredAtUtc = occurredAtUtc;
     }
     public Guid EventId { get; private set; }

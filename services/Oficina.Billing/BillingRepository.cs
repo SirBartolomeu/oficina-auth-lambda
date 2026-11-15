@@ -55,8 +55,8 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
         var inboxItem = InboxKey(eventId);
         inboxItem["receivedAtUtc"] = new AttributeValue { S = DateTime.UtcNow.ToString("O") };
         var outboxItem = OutboxKey(ready.EventId);
-        outboxItem["body"] = new AttributeValue { S = JsonSerializer.Serialize(ready,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outboxItem["body"] = new AttributeValue { S = SqsTraceContext.Stamp(JsonSerializer.Serialize(ready,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))) };
         outboxItem["occurredAtUtc"] = new AttributeValue { S = ready.OccurredAtUtc.ToString("O") };
         try
         {
@@ -340,8 +340,8 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             occurredAt, new RefundConfirmedPayload(payment.Id, refundRequestId,
                 providerOrderId, payment.TotalCents, "BRL"));
         var outbox = OutboxKey(eventId);
-        outbox["body"] = new AttributeValue { S = JsonSerializer.Serialize(confirmed,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outbox["body"] = new AttributeValue { S = SqsTraceContext.Stamp(JsonSerializer.Serialize(confirmed,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))) };
         outbox["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
         try
         {
@@ -536,8 +536,8 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             occurredAt, new PaymentConfirmedPayload(payment.Id, providerOrderId,
                 payment.TotalCents, "BRL"));
         var outbox = OutboxKey(eventId);
-        outbox["body"] = new AttributeValue { S = JsonSerializer.Serialize(confirmation,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outbox["body"] = new AttributeValue { S = SqsTraceContext.Stamp(JsonSerializer.Serialize(confirmation,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))) };
         outbox["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
         try
         {
@@ -588,8 +588,8 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             occurredAt, new PaymentRejectedPayload(payment.Id, providerOrderId,
                 payment.TotalCents, "BRL", reason));
         var outbox = OutboxKey(eventId);
-        outbox["body"] = new AttributeValue { S = JsonSerializer.Serialize(rejection,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outbox["body"] = new AttributeValue { S = SqsTraceContext.Stamp(JsonSerializer.Serialize(rejection,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))) };
         outbox["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
         try
         {
@@ -672,8 +672,8 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
             workOrderId, existing.BranchId, occurredAt,
             new BudgetDecisionPayload(existing.Id, version, decisionId, null));
         var outboxItem = OutboxKey(decisionId);
-        outboxItem["body"] = new AttributeValue { S = JsonSerializer.Serialize(decision,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web)) };
+        outboxItem["body"] = new AttributeValue { S = SqsTraceContext.Stamp(JsonSerializer.Serialize(decision,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))) };
         outboxItem["occurredAtUtc"] = new AttributeValue { S = occurredAt.ToString("O") };
         try
         {
