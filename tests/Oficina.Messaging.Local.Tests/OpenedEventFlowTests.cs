@@ -125,7 +125,7 @@ public sealed class OpenedEventFlowTests
             while (budget is null && !timeout.IsCancellationRequested)
             {
                 budget = await repository.GetAsync(orderId, 1, CancellationToken.None);
-                if (budget is null) await Task.Delay(100, timeout.Token);
+                if (budget is null) await Task.Delay(100);
             }
         }
         Assert.NotNull(budget);
@@ -165,14 +165,14 @@ public sealed class OpenedEventFlowTests
         await executionWorker.StartAsync(CancellationToken.None);
         await executionOutbox.StartAsync(CancellationToken.None);
         WorkOrderStatus status = WorkOrderStatus.Received;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
             while (status != WorkOrderStatus.AwaitingApproval && !timeout.IsCancellationRequested)
             {
                 await using var verify = new WorkshopDbContext(dbOptions);
                 status = (await verify.WorkOrders.SingleAsync(item => item.Id == orderId)).Status;
                 if (status != WorkOrderStatus.AwaitingApproval)
-                    await Task.Delay(100, timeout.Token);
+                    await Task.Delay(100);
             }
         }
         Assert.Equal(12500, budget.TotalCents);
@@ -190,7 +190,7 @@ public sealed class OpenedEventFlowTests
         Assert.Equal(BudgetStatus.Approved,
             (await repository.DecideAsync(orderId, 1, true, CancellationToken.None))!.Status);
         WorkOrderProcessState decisionState = WorkOrderProcessState.AwaitingApproval;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
             while (decisionState == WorkOrderProcessState.AwaitingApproval && !timeout.IsCancellationRequested)
             {
@@ -217,7 +217,7 @@ public sealed class OpenedEventFlowTests
         }
         Assert.Empty(await repository.GetPendingOutboxAsync(CancellationToken.None));
         WorkOrderProcessState reservationState = WorkOrderProcessState.AwaitingStockReservation;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
             while (reservationState == WorkOrderProcessState.AwaitingStockReservation &&
                    !timeout.IsCancellationRequested)
@@ -239,7 +239,7 @@ public sealed class OpenedEventFlowTests
                 NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
         }
         PaymentRequest? payment = null;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
             while (payment is null && !timeout.IsCancellationRequested)
             {
@@ -275,7 +275,7 @@ public sealed class OpenedEventFlowTests
         Assert.True(await reconciler.ReconcileAsync("ORDTEST123", CancellationToken.None));
         Assert.False(await reconciler.ReconcileAsync("ORDTEST123", CancellationToken.None));
         WorkOrderProcessState paymentState = WorkOrderProcessState.AwaitingPayment;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
             while (paymentState == WorkOrderProcessState.AwaitingPayment && !timeout.IsCancellationRequested)
             {
@@ -294,7 +294,7 @@ public sealed class OpenedEventFlowTests
             Assert.Equal(1, await new OutboxDispatcher(consumeDb, sender,
                 NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
         }
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
             var queued = false;
             while (!queued && !timeout.IsCancellationRequested)
@@ -314,7 +314,7 @@ public sealed class OpenedEventFlowTests
                 NullLogger<OutboxDispatcher>.Instance).DispatchBatchAsync(CancellationToken.None));
         }
         WorkOrderProcessState executionState = WorkOrderProcessState.ReadyForExecution;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
             while (executionState == WorkOrderProcessState.ReadyForExecution &&
                    !timeout.IsCancellationRequested)

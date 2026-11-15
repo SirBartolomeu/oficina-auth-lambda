@@ -306,6 +306,30 @@ public sealed class StockReservationFlowTests
 
         await using var finalOs = new WorkshopDbContext(osOptions);
         await using var finalExecution = new ExecutionDbContext(executionOptions);
+        if (paid)
+        {
+            var consume = await finalOs.OutboxMessages.SingleAsync(item =>
+                item.EventType == "ConsumeStockRequested");
+            Assert.False(await new ConsumeStockRequestedHandler(finalExecution,
+                new ExecutionService(finalExecution)).HandleAsync(consume.PayloadJson,
+                CancellationToken.None));
+            var consumed = await finalExecution.OutboxMessages.SingleAsync(item =>
+                item.EventType == "StockConsumed");
+            Assert.False(await new StockConsumedHandler(finalOs).HandleAsync(consumed.Body,
+                CancellationToken.None));
+        }
+        else if (expectedState == WorkOrderProcessState.AwaitingPayment)
+        {
+            var release = await finalOs.OutboxMessages.SingleAsync(item =>
+                item.EventType == "ReleaseStockRequested");
+            Assert.False(await new ReleaseStockRequestedHandler(finalExecution,
+                new ExecutionService(finalExecution)).HandleAsync(release.PayloadJson,
+                CancellationToken.None));
+            var released = await finalExecution.OutboxMessages.SingleAsync(item =>
+                item.EventType == "StockReleased");
+            Assert.False(await new StockReleasedHandler(finalOs).HandleAsync(released.Body,
+                CancellationToken.None));
+        }
         Assert.Equal(paid ? WorkOrderProcessState.InExecution : WorkOrderProcessState.Canceled, state);
         Assert.Equal(paid ? expectedStock - requested : expectedStock,
             (await finalExecution.PartSupplies.SingleAsync(item => item.Id == part.Id)).StockQuantity);
