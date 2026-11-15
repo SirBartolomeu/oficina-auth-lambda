@@ -152,11 +152,12 @@ if (!string.IsNullOrWhiteSpace(executionBaseUrl))
         string.IsNullOrWhiteSpace(executionInternalToken))
         throw new InvalidOperationException("Execution:BaseUrl e Execution:InternalToken devem ser válidos.");
 
-    builder.Services.AddHttpClient<IExecutionQuoteClient, HttpExecutionQuoteClient>(client =>
+    builder.Services.AddHttpClient("execution-quote", client =>
     {
         client.BaseAddress = new Uri(executionUri.ToString().TrimEnd('/') + "/");
         client.Timeout = TimeSpan.FromSeconds(5);
-    }).AddTypedClient((client, _) => new HttpExecutionQuoteClient(client, executionInternalToken));
+    }).AddTypedClient<IExecutionQuoteClient>((client, _) =>
+        new HttpExecutionQuoteClient(client, executionInternalToken));
 }
 
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
