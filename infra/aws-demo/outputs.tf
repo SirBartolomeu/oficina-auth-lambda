@@ -57,3 +57,8 @@ output "application_secret_arns" {
   description = "Segredos vazios; o bootstrap do RDS grava os valores fora do Terraform state."
   value       = { for name, secret in aws_secretsmanager_secret.application : name => secret.arn }
 }
+
+output "ssm_deploy_document_names" {
+  description = "Documentos SSM restritos aos Deployments de cada serviço."
+  value       = { for name, document in aws_ssm_document.deploy_service : name => document.name }
+}
