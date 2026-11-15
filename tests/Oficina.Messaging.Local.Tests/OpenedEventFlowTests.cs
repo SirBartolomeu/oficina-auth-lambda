@@ -253,6 +253,25 @@ public sealed class OpenedEventFlowTests
         Assert.Equal(budget.Id, payment.BudgetId);
         Assert.True(await repository.CompletePaymentCreationAsync(paymentAttemptId,
             new MercadoPagoQrOrder("ORDTEST123", "qr-test", "created"), CancellationToken.None));
+        var wrongAmount = new OsEvents.IntegrationEnvelope<OsEvents.PaymentConfirmedPayload>(
+            Guid.NewGuid(), "PaymentConfirmed", 1, orderId, Guid.NewGuid(), orderId,
+            order.BranchId, DateTime.UtcNow,
+            new OsEvents.PaymentConfirmedPayload(paymentAttemptId, "ORDTEST123", 12499, "BRL"));
+        await using (var invalidDb = new WorkshopDbContext(dbOptions))
+        {
+            await Assert.ThrowsAsync<OficinaMvp.Domain.Exceptions.DomainException>(() =>
+                new PaymentConfirmedHandler(invalidDb).HandleAsync(
+                    JsonSerializer.Serialize(wrongAmount,
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                    CancellationToken.None));
+            Assert.Equal(WorkOrderProcessState.AwaitingPayment,
+                (await invalidDb.WorkOrders.SingleAsync(item => item.Id == orderId))
+                .ProcessState);
+            Assert.False(await invalidDb.OutboxMessages.AnyAsync(item =>
+                item.EventType == "ConsumeStockRequested"));
+            Assert.False(await invalidDb.InboxMessages.AnyAsync(item =>
+                item.EventType == "PaymentConfirmed"));
+        }
         using var providerHttp = new HttpClient(new StubHandler(request =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);

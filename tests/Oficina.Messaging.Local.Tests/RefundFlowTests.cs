@@ -14,6 +14,7 @@ using Oficina.Billing;
 using OficinaMvp.Api.Messaging;
 using OficinaMvp.Application.Contracts;
 using OficinaMvp.Domain.Entities;
+using OficinaMvp.Domain.Exceptions;
 using OficinaMvp.Infrastructure.Messaging;
 using OficinaMvp.Infrastructure.Persistence;
 using Xunit;
@@ -151,6 +152,27 @@ public sealed class RefundFlowTests
         await WaitUntilAsync(async () =>
             (await repository.GetPaymentAttemptAsync(paymentId, CancellationToken.None))?.Status == "Refunded");
         Assert.Equal(1, postCount);
+        var confirmed = Assert.Single(await repository.GetPendingOutboxAsync(
+            CancellationToken.None));
+        var confirmedEnvelope = JsonSerializer.Deserialize<IntegrationEnvelope<OficinaMvp.Application.Contracts.RefundConfirmedPayload>>(
+            confirmed.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var wrongRefund = confirmedEnvelope with
+        {
+            EventId = Guid.NewGuid(),
+            Payload = confirmedEnvelope.Payload with { RefundRequestId = Guid.NewGuid() }
+        };
+        await using (var beforeConfirmation = new WorkshopDbContext(options))
+        {
+            await Assert.ThrowsAsync<DomainException>(() =>
+                new RefundConfirmedHandler(beforeConfirmation).HandleAsync(
+                    JsonSerializer.Serialize(wrongRefund,
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                    CancellationToken.None));
+            Assert.Equal(WorkOrderProcessState.RefundRequested,
+                (await beforeConfirmation.WorkOrders.SingleAsync(item => item.Id == order.Id))
+                .ProcessState);
+            Assert.Empty(await beforeConfirmation.InboxMessages.ToListAsync());
+        }
         await outboxWorker.StartAsync(CancellationToken.None);
         await osWorker.StartAsync(CancellationToken.None);
         await WaitUntilAsync(async () =>
@@ -163,6 +185,9 @@ public sealed class RefundFlowTests
         {
             var final = await verify.WorkOrders.SingleAsync(item => item.Id == order.Id);
             Assert.Equal(WorkOrderStatus.Canceled, final.Status);
+            Assert.Single(await verify.InboxMessages.ToListAsync());
+            Assert.False(await new RefundConfirmedHandler(verify).HandleAsync(
+                confirmed.Body, CancellationToken.None));
             Assert.Single(await verify.InboxMessages.ToListAsync());
         }
         Assert.Empty(await repository.GetPendingRefundsAsync(CancellationToken.None));
