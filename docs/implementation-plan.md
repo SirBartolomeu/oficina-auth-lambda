@@ -1,6 +1,17 @@
 # Plano de implementação — Tech Challenge Fases 3 e 4
 
-Atualizado em 10/11/2026. Estado: **Etapa 1 aprovada; implementação incremental iniciada**. Base analisada: commit `ab3cdb1` da branch `main`. Este documento é a fonte de progresso, decisões, pendências e próximos passos.
+Atualizado em 15/11/2026. Estado: **plano de apresentação de dois dias em execução**. O plano amplo abaixo permanece como histórico e backlog; a seção seguinte define a prioridade vigente. Este documento é a fonte de progresso, decisões, pendências e próximos passos.
+
+## Plano vigente: apresentação em dois dias
+
+**Objetivo:** demonstrar em até 15 minutos um fluxo real e reproduzível no Docker Desktop: OS, Execução e Billing independentes; Saga por filas; autenticação de cliente pelo adaptador da Lambda; dashboard e alerta. Pagamento e estorno no cenário automatizado usam provedor simulado e serão identificados assim. Não declarar AWS, Mercado Pago real, cobertura por serviço ou repositórios separados como concluídos.
+
+| Quando | Entrega focada | Critério de saída |
+|---|---|---|
+| Dia 1 | Roteiro único de smoke local, com OS chegando a `AwaitingApproval`, token por CPF, tracking protegido, teste focado da Saga até execução e dashboard | Um comando repetível, sem edição manual de banco ou mensagens; resultados e URLs claros |
+| Dia 2 | Ensaiar o roteiro de 15 minutos, conferir testes essenciais, preparar evidências e um caminho de contingência com saídas já registradas | Duas execuções consecutivas verdes e roteiro curto documentado |
+
+**Corte de escopo para estes dois dias:** não iniciar Terraform AWS, publicação de repositórios, deploy pago, integração real Mercado Pago, implantação K3s ou nova arquitetura. Os manifests e o plano amplo permanecem no repositório para uma continuação posterior. A apresentação mostrará o que funciona localmente e indicará de forma objetiva o que ainda não foi validado em AWS. Nenhum recurso pago ou publicação será feito sem autorização explícita.
 
 ## Decisão executiva
 
@@ -158,8 +169,6 @@ Estimativa de progresso em 14/11/2026: **aproximadamente 55% do escopo total imp
 
 ## Próximo passo
 
-O commit `a6f97f9` registra o overlay K3s de monitoramento. Neste incremento, `k8s/distributed` prepara OS, Execução e Billing como três Deployments/Services privados, ConfigMaps, ServiceAccounts e HPAs independentes. Cada serviço tem probes, limites de CPU/memória e OTLP para o Collector; OS e Execução apontam para databases PostgreSQL próprios, Billing para DynamoDB. Kustomize renderizou 16 recursos e `scripts/verify-distributed-manifests.ps1` passou. Nenhum recurso AWS foi criado.
+O commit `9d78c01` registra os manifests K3s dos três serviços. O foco atual é a apresentação local definida no início deste documento. `scripts/demo-fase4.ps1 -SkipBuild` passou duas vezes em 15/11/2026 e registrou a última execução em `docs/evidence/demo-local.json`: OS em `AwaitingApproval`, trace, tracking autenticado, teste focado da Saga com provedor simulado (1 aprovado, 0 falhas) e nove painéis do Grafana. O roteiro está em `docs/demo-15-min.md`. A execução sem acesso ao Docker foi descartada; a repetição com acesso ao Docker Desktop passou.
 
-O K3s final, RDS, DynamoDB, SQS, Secrets e identidades AWS por workload ainda não existem; por isso o overlay foi validado estaticamente e não aplicado. O SDK nos pods ignora IMDS; ainda falta bloquear acesso de rede ao IMDS e fornecer IAM próprio por workload. As imagens `:local` e URLs de fila são marcadores até o pipeline/Terraform. O HPA dependerá do metrics-server do K3s e será verificado com `kubectl top pods` no cluster final.
-
-Continuar ordem 7: desenhar no Terraform AWS os dois bancos SQL, a tabela DynamoDB, SQS/DLQ e identidades temporárias separadas para os três pods; integrar imagens ECR e Secrets sem chaves estáticas. Depois validar os manifests no K3s e o overlay de monitoramento. A ligação pública da Lambda em AWS, TLS confiável e rate limit de produção devem ser definidos no Terraform e testados no deploy autorizado. Nenhum token de produção deve residir no repositório. Nas ordens 3–5 ainda restam DLQ AWS, limites de retenção, testes remotos com Mercado Pago, cenário Gherkin com runner próprio se exigido e execução do workflow no GitHub após publicação autorizada. Uma recusa após o início do serviço físico não deve estornar automaticamente sem revisão. Depois, pipelines OIDC, proteção de branch e validação final/documentação/apresentação. Os diretórios `services/*` ainda estão no repositório atual para facilitar a extração; separar em repositórios Git independentes preservando o histórico antes do deploy. Antes de qualquer `terraform apply`, criação de recursos pagos ou publicação de repositórios, apresentar o plano concreto desses atos para autorização explícita.
+**Próxima etapa dos dois dias:** ensaiar o roteiro cronometrado e guardar capturas mínimas da demonstração. Se houver falha, corrigir somente o caminho crítico do demo. Depois, apresentar os itens acadêmicos ainda pendentes como backlog, sem afirmar que foram concluídos. Nenhum recurso AWS pago ou repositório remoto será criado sem autorização explícita.
