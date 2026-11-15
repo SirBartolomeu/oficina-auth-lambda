@@ -19,7 +19,7 @@ Na primeira execução ou após mudanças nas imagens, omitir `-SkipBuild`. O co
 | 5–8 min | Console AWS e `kubectl get pods,svc,hpa` | EC2/K3s, RDS, DynamoDB, SQS/DLQ e três pods prontos; mostrar SHA de imagem e healthchecks. |
 | 8–12 min | `bash /opt/oficina-demo/scripts/aws-demo/verify-flow-k3s.sh` e demo local | Mostrar OS/trace AWS até `AwaitingApproval`; no Docker, CPF/JWT e Saga até execução com pagamento simulado; explicar uma compensação. |
 | 12–14 min | Grafana/traces e alerta | Métricas de negócio, correlação distribuída e falha observável. |
-| 14–15 min | [Plano](implementation-plan.md) | Custos da janela curta, pendências honestas e encerramento. |
+| 14–15 min | [Matriz de evidências](evidence/phase4-status.md) | Custos da janela curta, requisitos comprovados e pendências honestas. |
 
 ## Contingência e limites
 
