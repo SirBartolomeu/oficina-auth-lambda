@@ -22,11 +22,22 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
+                    string? eventId = null;
+                    string? correlationId = null;
                     try
                     {
                         using var scope = scopes.CreateScope();
                         using var envelope = JsonDocument.Parse(message.Body);
-                        var eventType = envelope.RootElement.GetProperty("eventType").GetString();
+                        var root = envelope.RootElement;
+                        var eventType = root.GetProperty("eventType").GetString();
+                        eventId = root.GetProperty("eventId").GetString();
+                        correlationId = root.GetProperty("correlationId").GetString();
+                        using var logScope = logger.BeginScope(new Dictionary<string, object?>
+                        {
+                            ["eventId"] = eventId,
+                            ["correlationId"] = correlationId,
+                            ["workOrderId"] = root.GetProperty("workOrderId").GetString()
+                        });
                         if (eventType == "BudgetReady")
                             await scope.ServiceProvider.GetRequiredService<BudgetReadyHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
@@ -63,6 +74,7 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                         else
                             throw new InvalidOperationException($"Evento não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
+                        logger.LogInformation("Evento {EventType} processado na OS", eventType);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
@@ -70,7 +82,9 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                     }
                     catch (Exception error)
                     {
-                        logger.LogWarning(error, "Falha ao consumir evento {MessageId} na OS", message.MessageId);
+                        logger.LogWarning(error,
+                            "Falha ao consumir evento {MessageId} {EventId} {CorrelationId} na OS",
+                            message.MessageId, eventId, correlationId);
                     }
                 }
             }

@@ -26,11 +26,22 @@ public sealed class BillingSqsWorker(
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
+                    string? eventId = null;
+                    string? correlationId = null;
                     try
                     {
                         using var scope = scopes.CreateScope();
                         using var envelope = JsonDocument.Parse(message.Body);
-                        var eventType = envelope.RootElement.GetProperty("eventType").GetString();
+                        var root = envelope.RootElement;
+                        var eventType = root.GetProperty("eventType").GetString();
+                        eventId = root.GetProperty("eventId").GetString();
+                        correlationId = root.GetProperty("correlationId").GetString();
+                        using var logScope = logger.BeginScope(new Dictionary<string, object?>
+                        {
+                            ["eventId"] = eventId,
+                            ["correlationId"] = correlationId,
+                            ["workOrderId"] = root.GetProperty("workOrderId").GetString()
+                        });
                         if (eventType == "WorkOrderOpened")
                             await scope.ServiceProvider.GetRequiredService<WorkOrderOpenedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
@@ -43,6 +54,7 @@ public sealed class BillingSqsWorker(
                         else
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
+                        logger.LogInformation("Comando {EventType} processado no Billing", eventType);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
@@ -50,7 +62,9 @@ public sealed class BillingSqsWorker(
                     }
                     catch (Exception error)
                     {
-                        logger.LogWarning(error, "Falha ao consumir mensagem {MessageId} no Billing", message.MessageId);
+                        logger.LogWarning(error,
+                            "Falha ao consumir mensagem {MessageId} {EventId} {CorrelationId} no Billing",
+                            message.MessageId, eventId, correlationId);
                     }
                 }
             }

@@ -9,6 +9,13 @@ using System.Text;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole(options =>
+{
+    options.IncludeScopes = true;
+    options.UseUtcTimestamp = true;
+    options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
+});
 var internalToken = builder.Configuration["InternalToken"];
 if (string.IsNullOrWhiteSpace(internalToken) || internalToken.Length < 32)
     throw new InvalidOperationException("InternalToken deve ter pelo menos 32 caracteres.");

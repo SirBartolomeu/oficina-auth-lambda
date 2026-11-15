@@ -22,11 +22,22 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
+                    string? eventId = null;
+                    string? correlationId = null;
                     try
                     {
                         using var scope = scopes.CreateScope();
                         using var envelope = JsonDocument.Parse(message.Body);
-                        var eventType = envelope.RootElement.GetProperty("eventType").GetString();
+                        var root = envelope.RootElement;
+                        var eventType = root.GetProperty("eventType").GetString();
+                        eventId = root.GetProperty("eventId").GetString();
+                        correlationId = root.GetProperty("correlationId").GetString();
+                        using var logScope = logger.BeginScope(new Dictionary<string, object?>
+                        {
+                            ["eventId"] = eventId,
+                            ["correlationId"] = correlationId,
+                            ["workOrderId"] = root.GetProperty("workOrderId").GetString()
+                        });
                         if (eventType == "ReserveStockRequested")
                             await scope.ServiceProvider.GetRequiredService<ReserveStockRequestedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
@@ -42,11 +53,14 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                         else
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
+                        logger.LogInformation("Comando {EventType} processado na Execução", eventType);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
                     catch (Exception error)
                     {
-                        logger.LogWarning(error, "Falha ao consumir comando {MessageId} na Execução", message.MessageId);
+                        logger.LogWarning(error,
+                            "Falha ao consumir comando {MessageId} {EventId} {CorrelationId} na Execução",
+                            message.MessageId, eventId, correlationId);
                     }
                 }
             }
