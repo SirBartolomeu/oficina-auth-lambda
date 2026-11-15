@@ -78,6 +78,11 @@ output "auth_lambda_name" {
   value       = aws_lambda_function.auth.function_name
 }
 
+output "github_auth_deploy_role_arn" {
+  description = "Role OIDC de deploy da Function no repositório Auth."
+  value       = aws_iam_role.github_auth_deploy.arn
+}
+
 output "auth_token_url" {
   description = "URL publica do POST /auth/token da HTTP API."
   value       = "${aws_apigatewayv2_api.auth.api_endpoint}/auth/token"

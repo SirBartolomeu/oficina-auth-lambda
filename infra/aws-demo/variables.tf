@@ -56,3 +56,14 @@ variable "github_repositories" {
     error_message = "Defina exatamente os repositórios os, execution e billing."
   }
 }
+
+variable "github_auth_repository" {
+  description = "Repositório independente da Function Auth."
+  type        = string
+  default     = "oficina-auth-lambda"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]{1,100}$", var.github_auth_repository))
+    error_message = "Informe somente o nome do repositório Auth, sem URL ou barra."
+  }
+}

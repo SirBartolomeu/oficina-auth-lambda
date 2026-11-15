@@ -1,4 +1,8 @@
-param([string]$OutputRoot = 'exports')
+param(
+    [string]$OutputRoot = 'exports',
+    [ValidateSet('oficina-os', 'oficina-execution', 'oficina-billing', 'oficina-auth-lambda')]
+    [string[]]$SelectedServices = @('oficina-os', 'oficina-execution', 'oficina-billing')
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
@@ -19,10 +23,11 @@ $services = [ordered]@{
     'oficina-os' = @('src', 'tests/OficinaMvp.Domain.Tests', 'tests/OficinaMvp.Integration.Tests', 'tests/OficinaMvp.Postgres.Tests', 'services/Oficina.Auth', 'services/Oficina.Auth.Tests', '.github/workflows/os-ci.yml')
     'oficina-execution' = @('services/Oficina.Execution', 'services/Oficina.Execution.Tests', 'services/Oficina.Execution.Postgres.Tests', '.github/workflows/execution-ci.yml')
     'oficina-billing' = @('services/Oficina.Billing', 'services/Oficina.Billing.Tests', 'services/Oficina.Billing.Dynamo.Tests', 'docs/runbooks/refund-reconciliation.md', '.github/workflows/billing-ci.yml')
+    'oficina-auth-lambda' = @('services/Oficina.Auth', 'services/Oficina.Auth.Tests', 'scripts/aws-demo/build-auth-lambda.ps1', '.github/workflows/auth-ci.yml')
 }
 
 if (-not (Test-Path -LiteralPath $exportRoot)) { New-Item -ItemType Directory -Path $exportRoot | Out-Null }
-foreach ($service in $services.Keys) {
+foreach ($service in $SelectedServices) {
     $target = Join-Path $exportRoot $service
     if (Test-Path -LiteralPath $target) { throw "Destino já existe: $target. Não será sobrescrito." }
     & git clone --quiet --no-hardlinks --single-branch --branch $branch -- $repoRoot $target
@@ -42,11 +47,13 @@ foreach ($service in $services.Keys) {
         'oficina-os' { 'API de ordens de serviço e orquestração da Saga.' }
         'oficina-execution' { 'Catálogo, estoque e execução de reparos.' }
         'oficina-billing' { 'Orçamentos e pagamentos em DynamoDB.' }
+        'oficina-auth-lambda' { 'Autenticação serverless de clientes por CPF e JWT.' }
     }
     $testProject = switch ($service) {
         'oficina-os' { 'tests/OficinaMvp.Integration.Tests' }
         'oficina-execution' { 'services/Oficina.Execution.Tests' }
         'oficina-billing' { 'services/Oficina.Billing.Tests' }
+        'oficina-auth-lambda' { 'services/Oficina.Auth.Tests' }
     }
     @(
         "# $service",
@@ -60,7 +67,11 @@ foreach ($service in $services.Keys) {
         "dotnet test $testProject --configuration Release",
         '```',
         '',
-        'O workflow em `.github/workflows` executa testes, publica a imagem no ECR por OIDC e aciona o deploy K3s por SSM quando as variáveis GitHub estiverem configuradas.'
+        $(if ($service -eq 'oficina-auth-lambda') {
+            'O workflow em `.github/workflows` testa e empacota a Function; após configurar OIDC, atualiza o código da Lambda na AWS.'
+        } else {
+            'O workflow em `.github/workflows` executa testes, publica a imagem no ECR por OIDC e aciona o deploy K3s por SSM quando as variáveis GitHub estiverem configuradas.'
+        })
     ) | Set-Content -LiteralPath (Join-Path $target 'README.md') -Encoding utf8
 
     & git -C $target add -A
