@@ -15,6 +15,9 @@ permissions:
 jobs:
   test-and-image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -24,6 +27,26 @@ jobs:
         run: dotnet test services/Oficina.Execution.Tests --configuration Release --logger trx --results-directory test-results/execution
       - name: Build Execution container
         run: docker build -f services/Oficina.Execution/Dockerfile -t oficina-execution:${{ github.sha }} .
+      - name: ECR publication pending configuration
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && (vars.AWS_REGION == '' || vars.AWS_ROLE_ARN_EXECUTION == '' || vars.ECR_REPOSITORY_EXECUTION == '')
+        run: echo '::warning::ECR publication skipped; configure AWS_REGION, AWS_ROLE_ARN_EXECUTION and ECR_REPOSITORY_EXECUTION.'
+      - name: Configure AWS credentials for ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_EXECUTION != '' && vars.ECR_REPOSITORY_EXECUTION != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_EXECUTION }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Login to ECR
+        id: ecr-login
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_EXECUTION != '' && vars.ECR_REPOSITORY_EXECUTION != ''
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Push Execution image to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_EXECUTION != '' && vars.ECR_REPOSITORY_EXECUTION != ''
+        env:
+          IMAGE_URI: ${{ steps.ecr-login.outputs.registry }}/${{ vars.ECR_REPOSITORY_EXECUTION }}:${{ github.sha }}
+        run: |
+          docker tag oficina-execution:${{ github.sha }} "$IMAGE_URI"
+          docker push "$IMAGE_URI"
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

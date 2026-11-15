@@ -3,6 +3,11 @@ output "ecr_repositories" {
   value       = { for name, repo in aws_ecr_repository.service : name => repo.repository_url }
 }
 
+output "ecr_repository_names" {
+  description = "Nomes a configurar nas variables ECR_REPOSITORY_* dos workflows."
+  value       = { for name, repo in aws_ecr_repository.service : name => repo.name }
+}
+
 output "queue_urls" {
   description = "URLs a injetar nos ConfigMaps de OS, Execução e Billing."
   value       = { for name, queue in aws_sqs_queue.main : name => queue.id }
@@ -36,4 +41,9 @@ output "k3s_subnet_id" {
 output "k3s_instance_id" {
   description = "Usar no Session Manager ou Run Command; não há SSH público."
   value       = aws_instance.k3s.id
+}
+
+output "github_ecr_push_role_arns" {
+  description = "Configurar cada ARN como variável do workflow GitHub correspondente."
+  value       = { for name, role in aws_iam_role.github_push : name => role.arn }
 }

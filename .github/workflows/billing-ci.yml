@@ -15,6 +15,9 @@ permissions:
 jobs:
   test-and-image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -24,6 +27,26 @@ jobs:
         run: dotnet test services/Oficina.Billing.Tests --configuration Release --logger trx --results-directory test-results/billing
       - name: Build Billing container
         run: docker build -f services/Oficina.Billing/Dockerfile -t oficina-billing:${{ github.sha }} .
+      - name: ECR publication pending configuration
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && (vars.AWS_REGION == '' || vars.AWS_ROLE_ARN_BILLING == '' || vars.ECR_REPOSITORY_BILLING == '')
+        run: echo '::warning::ECR publication skipped; configure AWS_REGION, AWS_ROLE_ARN_BILLING and ECR_REPOSITORY_BILLING.'
+      - name: Configure AWS credentials for ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_BILLING != '' && vars.ECR_REPOSITORY_BILLING != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_BILLING }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Login to ECR
+        id: ecr-login
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_BILLING != '' && vars.ECR_REPOSITORY_BILLING != ''
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Push Billing image to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_BILLING != '' && vars.ECR_REPOSITORY_BILLING != ''
+        env:
+          IMAGE_URI: ${{ steps.ecr-login.outputs.registry }}/${{ vars.ECR_REPOSITORY_BILLING }}:${{ github.sha }}
+        run: |
+          docker tag oficina-billing:${{ github.sha }} "$IMAGE_URI"
+          docker push "$IMAGE_URI"
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

@@ -15,6 +15,9 @@ permissions:
 jobs:
   test-and-image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -26,6 +29,26 @@ jobs:
         run: dotnet test tests/OficinaMvp.Integration.Tests --configuration Release --logger trx --results-directory test-results/os-integration
       - name: Build OS container
         run: docker build -f src/OficinaMvp.Api/Dockerfile -t oficina-os:${{ github.sha }} .
+      - name: ECR publication pending configuration
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && (vars.AWS_REGION == '' || vars.AWS_ROLE_ARN_OS == '' || vars.ECR_REPOSITORY_OS == '')
+        run: echo '::warning::ECR publication skipped; configure AWS_REGION, AWS_ROLE_ARN_OS and ECR_REPOSITORY_OS.'
+      - name: Configure AWS credentials for ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_OS != '' && vars.ECR_REPOSITORY_OS != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_OS }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Login to ECR
+        id: ecr-login
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_OS != '' && vars.ECR_REPOSITORY_OS != ''
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Push OS image to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_REGION != '' && vars.AWS_ROLE_ARN_OS != '' && vars.ECR_REPOSITORY_OS != ''
+        env:
+          IMAGE_URI: ${{ steps.ecr-login.outputs.registry }}/${{ vars.ECR_REPOSITORY_OS }}:${{ github.sha }}
+        run: |
+          docker tag oficina-os:${{ github.sha }} "$IMAGE_URI"
+          docker push "$IMAGE_URI"
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
