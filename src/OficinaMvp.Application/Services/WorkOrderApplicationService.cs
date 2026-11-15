@@ -1,5 +1,6 @@
 using OficinaMvp.Application.Contracts;
 using OficinaMvp.Application.Ports;
+using OficinaMvp.Application.Observability;
 using OficinaMvp.Domain.Entities;
 using OficinaMvp.Domain.Exceptions;
 using OficinaMvp.Domain.Validation;
@@ -93,6 +94,7 @@ public sealed class WorkOrderApplicationService
         if (_executionQuoteClient is not null)
             _outbox.Enqueue(CreateOpenedEvent(workOrder));
         await _repository.SaveChangesAsync(cancellationToken);
+        WorkOrderMetrics.RecordOpened();
         await NotifyLatestStatusAsync(workOrder, cancellationToken);
 
         return await GetRequiredByIdAsync(workOrder.Id, cancellationToken);

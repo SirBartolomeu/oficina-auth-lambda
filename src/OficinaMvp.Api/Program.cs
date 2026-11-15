@@ -11,6 +11,7 @@ using Amazon.SQS;
 using OficinaMvp.Api.Middleware;
 using OficinaMvp.Api.Messaging;
 using OficinaMvp.Application.Ports;
+using OficinaMvp.Application.Observability;
 using OficinaMvp.Application.Services;
 using OficinaMvp.Infrastructure.Execution;
 using OficinaMvp.Infrastructure.Messaging;
@@ -56,6 +57,7 @@ if (!string.IsNullOrWhiteSpace(otlpEndpoint))
             .AddHttpClientInstrumentation()
             .AddOtlpExporter(options => options.Endpoint = endpoint))
         .WithMetrics(metrics => metrics
+            .AddMeter(WorkOrderMetrics.MeterName)
             .AddAspNetCoreInstrumentation()
             .AddOtlpExporter((options, readerOptions) =>
             {

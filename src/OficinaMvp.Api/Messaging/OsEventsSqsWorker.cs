@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using System.Text.Json;
+using OficinaMvp.Application.Observability;
 using OficinaMvp.Infrastructure.Messaging;
 
 namespace OficinaMvp.Api.Messaging;
@@ -46,41 +47,43 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                             ["correlationId"] = correlationId,
                             ["workOrderId"] = root.GetProperty("workOrderId").GetString()
                         });
+                        bool changed;
                         if (eventType == "BudgetReady")
-                            await scope.ServiceProvider.GetRequiredService<BudgetReadyHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<BudgetReadyHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType is "BudgetApproved" or "BudgetRefused")
-                            await scope.ServiceProvider.GetRequiredService<BudgetDecisionHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<BudgetDecisionHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType is "StockReserved" or "StockReservationRejected")
-                            await scope.ServiceProvider.GetRequiredService<StockReservationResultHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<StockReservationResultHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "PaymentConfirmed")
-                            await scope.ServiceProvider.GetRequiredService<PaymentConfirmedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<PaymentConfirmedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "PaymentRejected")
-                            await scope.ServiceProvider.GetRequiredService<PaymentRejectedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<PaymentRejectedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "StockReleased")
-                            await scope.ServiceProvider.GetRequiredService<StockReleasedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<StockReleasedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "StockConsumed")
-                            await scope.ServiceProvider.GetRequiredService<StockConsumedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<StockConsumedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "ExecutionStarted")
-                            await scope.ServiceProvider.GetRequiredService<ExecutionStartedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<ExecutionStartedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "ExecutionFinished")
-                            await scope.ServiceProvider.GetRequiredService<ExecutionFinishedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<ExecutionFinishedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "ExecutionRejected")
-                            await scope.ServiceProvider.GetRequiredService<ExecutionRejectedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<ExecutionRejectedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "RefundConfirmed")
-                            await scope.ServiceProvider.GetRequiredService<RefundConfirmedHandler>()
+                            changed = await scope.ServiceProvider.GetRequiredService<RefundConfirmedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else
                             throw new InvalidOperationException($"Evento não suportado: {eventType}");
+                        if (changed) WorkOrderMetrics.RecordSagaTransition(eventType);
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
                         logger.LogInformation("Evento {EventType} processado na OS", eventType);
                     }
