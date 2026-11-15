@@ -21,10 +21,10 @@ public sealed class BillingOutboxWorker(IAmazonSQS sqs, IServiceScopeFactory sco
                 var repository = scope.ServiceProvider.GetRequiredService<BillingRepository>();
                 var dispatcher = new BillingOutboxDispatcher(repository, async (item, ct) =>
                 {
-                    using var activity = new Activity("SQS publish").SetIdFormat(ActivityIdFormat.W3C);
                     var storedParent = SqsTraceContext.Read(item.Body);
-                    if (storedParent is not null) activity.SetParentId(storedParent);
-                    activity.Start();
+                    using var activity = SqsTraceContext.Start("SQS publish", ActivityKind.Producer, storedParent);
+                    activity.SetTag("messaging.system", "aws_sqs");
+                    activity.SetTag("messaging.operation.name", "publish");
                     var request = new SendMessageRequest
                     {
                         QueueUrl = queueUrl, MessageBody = item.Body,

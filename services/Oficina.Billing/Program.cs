@@ -37,6 +37,7 @@ if (!string.IsNullOrWhiteSpace(otlpEndpoint))
         .ConfigureResource(resource => resource.AddService("oficina-billing"))
         .WithTracing(tracing => tracing
             .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(sampleRatio)))
+            .AddSource(SqsTraceContext.SourceName)
             .AddAspNetCoreInstrumentation(options =>
                 options.Filter = context => !context.Request.Path.StartsWithSegments("/health"))
             .AddHttpClientInstrumentation()

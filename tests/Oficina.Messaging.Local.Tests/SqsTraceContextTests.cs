@@ -13,6 +13,31 @@ namespace Oficina.Messaging.Local.Tests;
 public sealed class SqsTraceContextTests
 {
     [Fact]
+    public void SqsActivitySourceEmitsChildSpanToListener()
+    {
+        Activity? stopped = null;
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == SqsTraceContext.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => stopped = activity
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var parent = new Activity("request").SetIdFormat(ActivityIdFormat.W3C).Start();
+
+        using (var activity = SqsTraceContext.Start("SQS publish", ActivityKind.Producer, parent.Id))
+        {
+            Assert.Equal(parent.TraceId, activity.TraceId);
+            Assert.Equal(parent.SpanId, activity.ParentSpanId);
+            Assert.Equal(ActivityKind.Producer, activity.Kind);
+            Assert.True(activity.IsAllDataRequested);
+        }
+
+        Assert.NotNull(stopped);
+        Assert.Equal("SQS publish", stopped.OperationName);
+    }
+
+    [Fact]
     public async Task OutboxPublisherCarriesW3cParentThroughSqsAttribute()
     {
         var endpoint = Environment.GetEnvironmentVariable("MESSAGING_SQS_ENDPOINT")

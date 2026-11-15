@@ -34,11 +34,12 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                         var eventType = root.GetProperty("eventType").GetString();
                         eventId = root.GetProperty("eventId").GetString();
                         correlationId = root.GetProperty("correlationId").GetString();
-                        using var activity = new Activity("SQS consume").SetIdFormat(ActivityIdFormat.W3C);
-                        if (message.MessageAttributes?.TryGetValue("traceparent", out var traceAttribute) == true &&
-                            ActivityContext.TryParse(traceAttribute.StringValue, null, out _))
-                            activity.SetParentId(traceAttribute.StringValue);
-                        activity.Start();
+                        var parent = message.MessageAttributes?.TryGetValue("traceparent", out var traceAttribute) == true
+                            ? traceAttribute.StringValue : null;
+                        using var activity = SqsTraceContext.Start("SQS consume", ActivityKind.Consumer, parent);
+                        activity.SetTag("messaging.system", "aws_sqs");
+                        activity.SetTag("messaging.operation.name", "process");
+                        activity.SetTag("messaging.message.type", eventType);
                         using var logScope = logger.BeginScope(new Dictionary<string, object?>
                         {
                             ["eventId"] = eventId,
@@ -97,10 +98,10 @@ public sealed class ExecutionOutboxWorker(IAmazonSQS sqs, IServiceScopeFactory s
                 var db = scope.ServiceProvider.GetRequiredService<ExecutionDbContext>();
                 var dispatcher = new ExecutionOutboxDispatcher(db, async (item, ct) =>
                 {
-                    using var activity = new Activity("SQS publish").SetIdFormat(ActivityIdFormat.W3C);
                     var storedParent = SqsTraceContext.Read(item.Body);
-                    if (storedParent is not null) activity.SetParentId(storedParent);
-                    activity.Start();
+                    using var activity = SqsTraceContext.Start("SQS publish", ActivityKind.Producer, storedParent);
+                    activity.SetTag("messaging.system", "aws_sqs");
+                    activity.SetTag("messaging.operation.name", "publish");
                     var request = new SendMessageRequest
                     {
                         QueueUrl = queueUrl, MessageBody = item.Body,

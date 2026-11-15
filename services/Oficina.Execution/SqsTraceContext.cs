@@ -6,6 +6,21 @@ namespace Oficina.Execution;
 
 internal static class SqsTraceContext
 {
+    public const string SourceName = "Oficina.Execution.Sqs";
+    private static readonly ActivitySource Source = new(SourceName);
+
+    public static Activity Start(string operation, ActivityKind kind, string? parent)
+    {
+        var validParent = ActivityContext.TryParse(parent, null, out var context);
+        var activity = validParent
+            ? Source.StartActivity(operation, kind, context)
+            : Source.StartActivity(operation, kind);
+        if (activity is not null) return activity;
+        activity = new Activity(operation).SetIdFormat(ActivityIdFormat.W3C);
+        if (validParent) activity.SetParentId(parent!);
+        return activity.Start();
+    }
+
     public static string Stamp(string envelopeJson)
     {
         var parent = Activity.Current?.Id;

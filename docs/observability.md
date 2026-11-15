@@ -40,4 +40,10 @@ Execução e Billing usam a mesma configuração opt-in da OS, com os nomes de r
 
 Validação local: `docker compose -f docker-compose.yml -f compose.execution.yml -f compose.billing.yml -f compose.telemetry.yml up -d --build execution-api billing-api otel-collector`. Requisições sem token a `/internal/catalog/services` na porta 8081 e a `/internal/budgets/{workOrderId}/{version}` na porta 8082 retornaram 401. O Collector registrou um span de cada serviço e exportações periódicas de métricas HTTP; 11 testes da Execução e 13 testes DynamoDB Billing passaram.
 
-Ainda faltam instrumentação exportável das atividades SQS, métricas de negócio, correlação da Lambda, dashboards e alertas.
+## Oitavo incremento: spans SQS da Saga
+
+Os publicadores e consumidores dos três serviços agora iniciam atividades de `ActivitySource` com `ActivityKind.Producer` ou `Consumer` e o parent W3C já gravado na Outbox ou recebido no atributo SQS. Cada serviço registra sua fonte no OpenTelemetry. Sem exportador configurado, a criação manual de atividades continua preservando `traceparent` para a próxima mensagem. Os spans registram sistema, operação e tipo de evento; não incluem CPF, token, corpo ou dados de pagamento.
+
+Um teste com `ActivityListener` confirmou que a publicação gera um span filho exportável com o mesmo trace ID; os três testes focados de trace SQS, 11 testes de Execução, 13 testes DynamoDB Billing e 23 testes de integração da OS passaram. Ainda falta executar uma Saga completa com os três serviços apontando ao Collector e confirmar o trace distribuído nele.
+
+Próximos itens: métricas de negócio, correlação da Lambda, dashboards e alertas.

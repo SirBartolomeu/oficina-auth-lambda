@@ -34,11 +34,12 @@ public sealed class OsEventsSqsWorker(IAmazonSQS sqs, IServiceScopeFactory scope
                         var eventType = root.GetProperty("eventType").GetString();
                         eventId = root.GetProperty("eventId").GetString();
                         correlationId = root.GetProperty("correlationId").GetString();
-                        using var activity = new Activity("SQS consume").SetIdFormat(ActivityIdFormat.W3C);
-                        if (message.MessageAttributes?.TryGetValue("traceparent", out var traceAttribute) == true &&
-                            ActivityContext.TryParse(traceAttribute.StringValue, null, out _))
-                            activity.SetParentId(traceAttribute.StringValue);
-                        activity.Start();
+                        var parent = message.MessageAttributes?.TryGetValue("traceparent", out var traceAttribute) == true
+                            ? traceAttribute.StringValue : null;
+                        using var activity = SqsTraceContext.Start("SQS consume", ActivityKind.Consumer, parent);
+                        activity.SetTag("messaging.system", "aws_sqs");
+                        activity.SetTag("messaging.operation.name", "process");
+                        activity.SetTag("messaging.message.type", eventType);
                         using var logScope = logger.BeginScope(new Dictionary<string, object?>
                         {
                             ["eventId"] = eventId,
