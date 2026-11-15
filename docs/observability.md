@@ -25,3 +25,13 @@ A OS grava `traceparent` como metadado opcional no JSON da Outbox, na mesma tran
 Execução grava o metadado `traceparent` no corpo da Outbox SQL; Billing o grava no corpo da Outbox DynamoDB dentro da transação de estado + mensagem. Os publicadores retomam esse contexto ao enviar pela SQS. Testes de persistência passaram nos dois bancos locais (11 testes Execução, 13 DynamoDB Billing); os 12 testes da Saga passaram. Um teste do fluxo OS→Billing confirmou que a Outbox do Billing manteve o trace ID iniciado na OS.
 
 O contexto W3C agora atravessa as três Outboxes e a SQS, mas ainda faltam um exportador de spans/métricas, amostragem, correlação da Lambda, dashboards e alertas para demonstrar um trace distribuído. As atividades atuais usam `System.Diagnostics.Activity` sem coletor. O custo de logs na AWS dependerá de volume e retenção; configurar retenção curta e limites antes do deploy.
+
+## Sexto incremento: exportação OTLP da OS
+
+A OS ativa OpenTelemetry apenas quando `Observability:OtlpEndpoint` está configurado. Coleta spans de ASP.NET Core e HttpClient, métricas HTTP e exporta por OTLP/gRPC. `Observability:TraceSampleRatio` aceita 0–1 (padrão 0,1) e `Observability:MetricExportIntervalSeconds` aceita 5–300 (padrão 60). Healthchecks não geram spans. Em produção, apontar o endpoint para um Collector autorizado e manter amostragem/retensão compatíveis com o orçamento.
+
+Para verificar localmente: `docker compose -f docker-compose.yml -f compose.gateway.yml -f compose.telemetry.yml up -d --build otel-collector oficina-api gateway`. O overlay inicia um Collector sem porta publicada no host, com exportador `debug`; envia amostra de 100% e métricas a cada 10 segundos. Três requisições a `https://localhost:8443/api/customers` retornaram 401; `docker logs oficina-mvp-otel-collector-1` confirmou 3 spans e 13 métricas. Os 23 testes de integração da OS passaram. O Collector local imprime dados de telemetria somente para validação; não usar esse exportador em produção.
+
+Fixamos os pacotes OpenTelemetry em 1.20.1: 1.21.0 causou conflito de `System.Diagnostics.DiagnosticSource` 11 com o runtime .NET 10 deste projeto. Fontes: [guia oficial de traces](https://opentelemetry.io/docs/languages/dotnet/traces/getting-started-aspnetcore/), [métricas](https://opentelemetry.io/docs/languages/dotnet/metrics/getting-started-aspnetcore/), [instalação do Collector](https://opentelemetry.io/docs/collector/install/docker/) e [configuração](https://opentelemetry.io/docs/collector/configuration/).
+
+Ainda faltam exportação OTLP de Execução/Billing, instrumentação exportável das atividades SQS, métricas de negócio, correlação da Lambda, dashboards e alertas.
