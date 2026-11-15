@@ -44,6 +44,7 @@ public sealed class WorkshopDbContext : DbContext
             entity.Property(customer => customer.Document).IsRequired().HasMaxLength(14);
             entity.Property(customer => customer.Phone).HasMaxLength(25);
             entity.Property(customer => customer.Email).HasMaxLength(150);
+            entity.Property(customer => customer.IsActive).IsRequired().HasDefaultValue(true);
             entity.HasIndex(customer => customer.Document).IsUnique();
         });
 
