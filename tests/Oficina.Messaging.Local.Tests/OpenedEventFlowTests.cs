@@ -86,7 +86,7 @@ public sealed class OpenedEventFlowTests
         db.OutboxMessages.Add(new OutboxMessage(eventId, "WorkOrderOpened", json, DateTime.UtcNow));
         await db.SaveChangesAsync();
 
-        var senderWithFailure = new FailOnceSender(new SqsIntegrationMessageSender(sqs, queueUrl));
+        var senderWithFailure = new AckLostOnceSender(new SqsIntegrationMessageSender(sqs, queueUrl));
         var clock = new ManualTimeProvider();
         var dispatcher = new OutboxDispatcher(db, senderWithFailure,
             NullLogger<OutboxDispatcher>.Instance, clock);
@@ -99,6 +99,7 @@ public sealed class OpenedEventFlowTests
         Assert.NotNull((await db.OutboxMessages.SingleAsync()).PublishedAtUtc);
         Assert.Equal(2, (await db.OutboxMessages.SingleAsync()).PublishAttempts);
         Assert.Null((await db.OutboxMessages.SingleAsync()).LastError);
+        Assert.Equal(2, senderWithFailure.Calls);
         var settings = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?>
             {
@@ -385,16 +386,17 @@ public sealed class OpenedEventFlowTests
             CancellationToken cancellationToken) => Task.FromResult(respond(request));
     }
 
-    private sealed class FailOnceSender(IIntegrationMessageSender inner) : IIntegrationMessageSender
+    private sealed class AckLostOnceSender(IIntegrationMessageSender inner) : IIntegrationMessageSender
     {
         private int _calls;
+        public int Calls => Volatile.Read(ref _calls);
 
-        public Task SendAsync(Guid eventId, string eventType, string payloadJson,
+        public async Task SendAsync(Guid eventId, string eventType, string payloadJson,
             CancellationToken cancellationToken)
         {
+            await inner.SendAsync(eventId, eventType, payloadJson, cancellationToken);
             if (Interlocked.Increment(ref _calls) == 1)
-                throw new HttpRequestException("Falha SQS transitória simulada.");
-            return inner.SendAsync(eventId, eventType, payloadJson, cancellationToken);
+                throw new HttpRequestException("Confirmação SQS perdida após o envio.");
         }
     }
 
