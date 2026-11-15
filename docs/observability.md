@@ -10,4 +10,10 @@ Validação local: `docker compose -f docker-compose.yml -f compose.gateway.yml 
 
 Execução e Billing também emitem JSON no stdout em UTC. Os três consumidores SQS colocam `eventId`, `correlationId` e `workOrderId` no escopo dos logs durante o tratamento de cada mensagem. Após confirmação de remoção da fila, registram o tipo de evento processado. Em falhas, a linha de aviso inclui `MessageId` da SQS, `eventId` e `correlationId` quando o envelope pôde ser lido. O corpo da mensagem, CPF, tokens e dados de pagamento não são registrados. Os 10 testes locais da Saga passaram usando ElasticMQ e DynamoDB Local. As imagens de Execução e Billing foram reconstruídas e a saída de log de ambos foi lida como JSON válido.
 
-`correlationId` é o identificador da Saga, não um trace W3C. Ainda faltam exportação de traces e métricas, propagação de `traceparent` por SQS, correlação dos publicadores Outbox e da Lambda, dashboards e alertas. O custo de logs na AWS dependerá de volume e retenção; configurar retenção curta e limites antes do deploy.
+`correlationId` é o identificador da Saga, não um trace W3C.
+
+## Terceiro incremento: contexto W3C na SQS
+
+Os publicadores OS, Execução e Billing criam uma atividade W3C e enviam seu `traceparent` no atributo da mensagem SQS. Os três consumidores solicitam esse atributo, validam o formato e retomam uma atividade filha antes de executar o handler. Se o atributo estiver ausente ou inválido, a mensagem continua sendo processada com uma nova atividade. Um teste com ElasticMQ confirmou que o atributo recebido contém o mesmo trace ID da atividade emissora; 11 testes locais da Saga passaram.
+
+A Outbox durável ainda não grava o contexto da requisição/consumo original: o dispatcher em segundo plano inicia um novo trace ao publicar. Assim, cada salto publicação→consumo está ligado, mas o trace completo da OS até o fim da Saga **ainda não** está implementado. Faltam persistir o contexto na Outbox, exportar spans e métricas, correlacionar a Lambda, dashboards e alertas. O custo de logs na AWS dependerá de volume e retenção; configurar retenção curta e limites antes do deploy.

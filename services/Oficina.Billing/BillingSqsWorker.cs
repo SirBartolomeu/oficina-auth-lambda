@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using System.Text.Json;
@@ -22,7 +23,8 @@ public sealed class BillingSqsWorker(
                 {
                     QueueUrl = queueUrl,
                     MaxNumberOfMessages = 10,
-                    WaitTimeSeconds = 10
+                    WaitTimeSeconds = 10,
+                    MessageAttributeNames = ["traceparent"]
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
@@ -36,6 +38,11 @@ public sealed class BillingSqsWorker(
                         var eventType = root.GetProperty("eventType").GetString();
                         eventId = root.GetProperty("eventId").GetString();
                         correlationId = root.GetProperty("correlationId").GetString();
+                        using var activity = new Activity("SQS consume").SetIdFormat(ActivityIdFormat.W3C);
+                        if (message.MessageAttributes?.TryGetValue("traceparent", out var traceAttribute) == true &&
+                            ActivityContext.TryParse(traceAttribute.StringValue, null, out _))
+                            activity.SetParentId(traceAttribute.StringValue);
+                        activity.Start();
                         using var logScope = logger.BeginScope(new Dictionary<string, object?>
                         {
                             ["eventId"] = eventId,

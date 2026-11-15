@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
@@ -18,7 +19,8 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
             {
                 var response = await sqs.ReceiveMessageAsync(new ReceiveMessageRequest
                 {
-                    QueueUrl = queueUrl, MaxNumberOfMessages = 10, WaitTimeSeconds = 10
+                    QueueUrl = queueUrl, MaxNumberOfMessages = 10, WaitTimeSeconds = 10,
+                    MessageAttributeNames = ["traceparent"]
                 }, stoppingToken);
                 foreach (var message in response.Messages ?? [])
                 {
@@ -32,6 +34,11 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                         var eventType = root.GetProperty("eventType").GetString();
                         eventId = root.GetProperty("eventId").GetString();
                         correlationId = root.GetProperty("correlationId").GetString();
+                        using var activity = new Activity("SQS consume").SetIdFormat(ActivityIdFormat.W3C);
+                        if (message.MessageAttributes?.TryGetValue("traceparent", out var traceAttribute) == true &&
+                            ActivityContext.TryParse(traceAttribute.StringValue, null, out _))
+                            activity.SetParentId(traceAttribute.StringValue);
+                        activity.Start();
                         using var logScope = logger.BeginScope(new Dictionary<string, object?>
                         {
                             ["eventId"] = eventId,
@@ -90,7 +97,15 @@ public sealed class ExecutionOutboxWorker(IAmazonSQS sqs, IServiceScopeFactory s
                 var db = scope.ServiceProvider.GetRequiredService<ExecutionDbContext>();
                 var dispatcher = new ExecutionOutboxDispatcher(db, async (item, ct) =>
                 {
-                    var request = new SendMessageRequest { QueueUrl = queueUrl, MessageBody = item.Body };
+                    using var activity = new Activity("SQS publish").SetIdFormat(ActivityIdFormat.W3C).Start();
+                    var request = new SendMessageRequest
+                    {
+                        QueueUrl = queueUrl, MessageBody = item.Body,
+                        MessageAttributes = new Dictionary<string, MessageAttributeValue>
+                        {
+                            ["traceparent"] = new() { DataType = "String", StringValue = activity.Id }
+                        }
+                    };
                     if (queueUrl.EndsWith(".fifo", StringComparison.OrdinalIgnoreCase))
                     {
                         using var body = JsonDocument.Parse(item.Body);

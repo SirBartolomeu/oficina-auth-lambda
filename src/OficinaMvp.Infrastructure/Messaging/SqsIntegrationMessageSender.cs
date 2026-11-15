@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
@@ -22,13 +23,15 @@ public sealed class SqsIntegrationMessageSender : IIntegrationMessageSender
     {
         if (!_queueUrls.TryGetValue(eventType, out var queueUrl) || string.IsNullOrWhiteSpace(queueUrl))
             throw new InvalidOperationException($"Fila SQS não configurada para {eventType}.");
+        using var activity = new Activity("SQS publish").SetIdFormat(ActivityIdFormat.W3C).Start();
         var request = new SendMessageRequest
         {
             QueueUrl = queueUrl,
             MessageBody = payloadJson,
             MessageAttributes = new Dictionary<string, MessageAttributeValue>
             {
-                ["eventType"] = new() { DataType = "String", StringValue = eventType }
+                ["eventType"] = new() { DataType = "String", StringValue = eventType },
+                ["traceparent"] = new() { DataType = "String", StringValue = activity.Id }
             }
         };
         if (queueUrl.EndsWith(".fifo", StringComparison.OrdinalIgnoreCase))
