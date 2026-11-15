@@ -78,10 +78,9 @@ public static class MappingExtensions
             ProcessState = workOrder.ProcessState
         };
 
-    public static ClientTrackingResponse ToClientTrackingResponse(this WorkOrder workOrder, string customerDocument) =>
+    public static ClientTrackingResponse ToClientTrackingResponse(this WorkOrder workOrder) =>
         new(
             workOrder.Id,
-            customerDocument,
             workOrder.Status,
             workOrder.CreatedAtUtc,
             workOrder.UpdatedAtUtc,

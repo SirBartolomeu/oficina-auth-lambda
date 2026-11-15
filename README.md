@@ -152,9 +152,9 @@ Administrativos com JWT:
 - `POST /api/work-orders/{id}/deliver`
 - `GET /api/work-orders/metrics/average-execution-time`
 
-Publico:
+Cliente autenticado com JWT `Customer` da Function (sem CPF na URL ou resposta):
 
-- `GET /api/client/work-orders/{id}?document={cpfOuCnpj}`
+- `GET /api/client/work-orders/{id}`
 
 Integracao externa:
 

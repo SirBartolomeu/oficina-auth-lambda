@@ -19,6 +19,7 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\services\Oficina.Auth\Oficina.Auth.csproj" />
     <ProjectReference Include="..\..\src\OficinaMvp.Api\OficinaMvp.Api.csproj" />
     <ProjectReference Include="..\..\src\OficinaMvp.Application\OficinaMvp.Application.csproj" />
     <ProjectReference Include="..\..\src\OficinaMvp.Domain\OficinaMvp.Domain.csproj" />

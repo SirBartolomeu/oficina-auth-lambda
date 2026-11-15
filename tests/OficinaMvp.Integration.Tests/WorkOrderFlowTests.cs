@@ -30,7 +30,7 @@ public sealed class WorkOrderFlowTests : IClassFixture<CustomWebApplicationFacto
         await AuthenticateAsync();
         const string customerDocument = "52998224725";
 
-        await PostAndGetCreatedIdAsync(
+        var customerId = await PostAndGetCreatedIdAsync(
             "/api/customers",
             new UpsertCustomerRequest("João da Silva", "529.982.247-25", "11999999999", "joao@email.com"));
 
@@ -83,12 +83,17 @@ public sealed class WorkOrderFlowTests : IClassFixture<CustomWebApplicationFacto
         Assert.Equal("Delivered", afterDeliver.RootElement.GetProperty("status").GetString());
         Assert.Equal(6, afterDeliver.RootElement.GetProperty("statusHistory").GetArrayLength());
 
-        var trackingResponse = await _httpClient.GetAsync($"/api/client/work-orders/{createdId}?document={customerDocument}");
+        using var trackingRequest = new HttpRequestMessage(HttpMethod.Get,
+            $"/api/client/work-orders/{createdId}");
+        trackingRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer",
+            await CustomerTokenFactory.CreateAsync(customerId));
+        var trackingResponse = await _httpClient.SendAsync(trackingRequest);
         trackingResponse.EnsureSuccessStatusCode();
         var trackingPayload = await trackingResponse.Content.ReadAsStringAsync();
         using var tracking = JsonDocument.Parse(trackingPayload);
 
         Assert.Equal("Delivered", tracking.RootElement.GetProperty("status").GetString());
+        Assert.False(tracking.RootElement.TryGetProperty("customerDocument", out _));
         Assert.Contains(
             tracking.RootElement.GetProperty("statusHistory").EnumerateArray().Select(item => item.GetProperty("status").GetString()),
             status => status == "AwaitingApproval");

@@ -6,7 +6,7 @@ using OficinaMvp.Application.Services;
 namespace OficinaMvp.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "Admin")]
 [Route("api/customers")]
 public sealed class CustomersController : ControllerBase
 {

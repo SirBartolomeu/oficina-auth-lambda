@@ -100,7 +100,6 @@ public sealed record RefundDecisionRequest(string Reason);
 
 public sealed record ClientTrackingResponse(
     Guid WorkOrderId,
-    string CustomerDocument,
     WorkOrderStatus Status,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc,
