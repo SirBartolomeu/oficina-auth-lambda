@@ -56,5 +56,6 @@ kubectl=(sudo /usr/local/bin/k3s kubectl)
 for deployment in oficina-api execution-api billing-api; do
   "${kubectl[@]}" -n oficina rollout status "deployment/$deployment" --timeout=300s
 done
+bash "$root/scripts/aws-demo/smoke-k3s.sh"
 "${kubectl[@]}" -n oficina get pods,svc,hpa
 echo 'Deploy inicial concluido; verificar as APIs por healthcheck e registrar evidencias.'
