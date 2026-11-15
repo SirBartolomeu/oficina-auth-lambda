@@ -47,3 +47,9 @@ Os publicadores e consumidores dos três serviços agora iniciam atividades de `
 Um teste com `ActivityListener` confirmou que a publicação gera um span filho exportável com o mesmo trace ID; os três testes focados de trace SQS, 11 testes de Execução, 13 testes DynamoDB Billing e 23 testes de integração da OS passaram. Ainda falta executar uma Saga completa com os três serviços apontando ao Collector e confirmar o trace distribuído nele.
 
 Próximos itens: métricas de negócio, correlação da Lambda, dashboards e alertas.
+
+## Nono incremento: verificação OTLP da Saga local
+
+O teste `OpenedOrderMovesThroughApprovalPaymentAndExecution` agora captura spans SQS de OS, Billing e Execução e exige o mesmo trace ID para as três fontes. Opcionalmente, `OTEL_TEST_ENDPOINT` ativa um exportador OTLP somente no processo do teste. Para reproduzir: iniciar o Collector com `docker compose -f docker-compose.yml -f compose.execution.yml -f compose.billing.yml -f compose.telemetry.yml -f compose.telemetry.test.yml up -d otel-collector`; configurar `MESSAGING_SQS_ENDPOINT=http://localhost:9324`, `BILLING_DYNAMO_ENDPOINT=http://localhost:8000` e `OTEL_TEST_ENDPOINT=http://localhost:4317`; executar `dotnet test tests/Oficina.Messaging.Local.Tests/Oficina.Messaging.Local.Tests.csproj`. O overlay de teste expõe OTLP somente em `127.0.0.1` e usa exportador `debug` detalhado para inspecionar os IDs. Voltar ao overlay normal após a verificação.
+
+Na execução local, os 13 testes passaram. O Collector registrou spans das três fontes sob `oficina-saga-local-test`, incluindo o trace ID `ee6744894900a665e7354ea9ae06b94e` em cada uma. Essa evidência valida a cadeia de contexto e a exportação, mas os três componentes foram hospedados pelo mesmo processo de teste; ainda falta um trace real entre os três contêineres independentes e sua visualização em dashboard.

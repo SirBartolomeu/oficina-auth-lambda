@@ -2,6 +2,7 @@ extern alias execution;
 
 using System.Net;
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Amazon.DynamoDBv2;
@@ -28,6 +29,9 @@ using OficinaMvp.Domain.Entities;
 using OsEvents = OficinaMvp.Application.Contracts;
 using OficinaMvp.Infrastructure.Messaging;
 using OficinaMvp.Infrastructure.Persistence;
+using OpenTelemetry;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Xunit;
 
 namespace Oficina.Messaging.Local.Tests;
@@ -37,6 +41,24 @@ public sealed class OpenedEventFlowTests
     [Fact]
     public async Task OpenedOrderMovesThroughApprovalPaymentAndExecution()
     {
+        var spans = new ConcurrentBag<(ActivityTraceId TraceId, string Source)>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name is SqsTraceContext.SourceName or
+                "Oficina.Billing.Sqs" or "Oficina.Execution.Sqs",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => spans.Add((activity.TraceId, activity.Source.Name))
+        };
+        ActivitySource.AddActivityListener(listener);
+        var otlpEndpoint = Environment.GetEnvironmentVariable("OTEL_TEST_ENDPOINT");
+        using var tracer = string.IsNullOrWhiteSpace(otlpEndpoint) ? null :
+            Sdk.CreateTracerProviderBuilder()
+                .ConfigureResource(resource => resource.AddService("oficina-saga-local-test"))
+                .AddSource(SqsTraceContext.SourceName, "Oficina.Billing.Sqs", "Oficina.Execution.Sqs")
+                .SetSampler(new AlwaysOnSampler())
+                .AddOtlpExporter(options => options.Endpoint = new Uri(otlpEndpoint))
+                .Build();
+        using var sagaTrace = new Activity("local saga").SetIdFormat(ActivityIdFormat.W3C).Start();
         var sqsEndpoint = Environment.GetEnvironmentVariable("MESSAGING_SQS_ENDPOINT")
             ?? throw new InvalidOperationException("Defina MESSAGING_SQS_ENDPOINT para o teste local.");
         var dynamoEndpoint = Environment.GetEnvironmentVariable("BILLING_DYNAMO_ENDPOINT")
@@ -389,6 +411,13 @@ public sealed class OpenedEventFlowTests
         await using var finalExecution = new ExecutionDbContext(executionOptions);
         Assert.Equal(ReservationStatus.Consumed,
             (await finalExecution.StockReservations.SingleAsync()).Status);
+        Assert.Contains(spans, span => span.TraceId == sagaTrace.TraceId &&
+            span.Source == SqsTraceContext.SourceName);
+        Assert.Contains(spans, span => span.TraceId == sagaTrace.TraceId &&
+            span.Source == "Oficina.Billing.Sqs");
+        Assert.Contains(spans, span => span.TraceId == sagaTrace.TraceId &&
+            span.Source == "Oficina.Execution.Sqs");
+        Assert.True(tracer?.ForceFlush() ?? true);
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
