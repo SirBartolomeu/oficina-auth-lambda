@@ -52,3 +52,8 @@ output "workload_role_arns" {
   description = "Roles temporárias distintas para OS, Execução e Billing no K3s."
   value       = { for name, role in aws_iam_role.workload : name => role.arn }
 }
+
+output "application_secret_arns" {
+  description = "Segredos vazios; o bootstrap do RDS grava os valores fora do Terraform state."
+  value       = { for name, secret in aws_secretsmanager_secret.application : name => secret.arn }
+}
