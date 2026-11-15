@@ -1,0 +1,35 @@
+name: os-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'tests/OficinaMvp.Domain.Tests/**', 'tests/OficinaMvp.Integration.Tests/**', 'global.json', '.github/workflows/os-ci.yml']
+  pull_request:
+    branches: [main]
+    paths: ['src/**', 'tests/OficinaMvp.Domain.Tests/**', 'tests/OficinaMvp.Integration.Tests/**', 'global.json', '.github/workflows/os-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Domain tests
+        run: dotnet test tests/OficinaMvp.Domain.Tests --configuration Release --logger trx --results-directory test-results/os-domain
+      - name: OS integration tests
+        run: dotnet test tests/OficinaMvp.Integration.Tests --configuration Release --logger trx --results-directory test-results/os-integration
+      - name: Build OS container
+        run: docker build -f src/OficinaMvp.Api/Dockerfile -t oficina-os:${{ github.sha }} .
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-test-results
+          path: test-results/**/*.trx
+          if-no-files-found: ignore

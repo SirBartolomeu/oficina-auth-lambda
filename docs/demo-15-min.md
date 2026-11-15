@@ -10,18 +10,19 @@ Com Docker Desktop aberto, na raiz do repositório:
 
 Na primeira execução ou após mudanças nas imagens, omitir `-SkipBuild`. O comando cria uma OS, verifica o fluxo entre OS, Execução e Billing, autentica um cliente pelo adaptador local da Lambda, consulta o tracking protegido, roda o teste focado da Saga e confirma o dashboard. A saída registra os identificadores e URLs; o resumo fica em `docs/evidence/demo-local.json`. Não exibir o token JWT durante a apresentação.
 
-## Roteiro cronometrado
+## Roteiro cronometrado, se AWS estiver implantada
 
 | Tempo | Mostrar | Mensagem principal |
 |---|---|---|
-| 0–2 min | Diagrama em `docs/architecture.md` e `docker compose ps` | Três APIs .NET independentes, PostgreSQL para OS/Execução, DynamoDB Local para Billing e filas locais. |
-| 2–6 min | Executar `./scripts/demo-fase4.ps1 -SkipBuild`; destacar `OS=...` e `trace=...` | A abertura da OS gera eventos, atravessa serviços e chega a `AwaitingApproval`. CPF recebe JWT e acessa somente seu tracking. |
-| 6–9 min | Resultado do teste `OpenedOrderMovesThroughApprovalPaymentAndExecution` impresso pelo comando | Aprovação, pagamento **simulado**, reserva e início da execução são coordenados pela Saga. Há compensações testadas no projeto. |
-| 9–12 min | Abrir `http://localhost:3000/d/oficina-local` e, se houver tempo, `http://localhost:9090/alerts` | Métricas, logs/traces correlacionados e alerta local. O script `./scripts/verify-alert-local.ps1` pode demonstrar disparo real, mas demora cerca de um minuto. |
-| 12–15 min | `docs/evidence/demo-local.json` e limites abaixo | Evidência reproduzível, decisões de custo e próximos passos para deploy autorizado. |
+| 0–2 min | [Arquitetura](architecture-phase4.md) | Três serviços .NET, bancos próprios SQL/NoSQL, Saga por filas e autenticação serverless. |
+| 2–5 min | GitHub Actions: três pipelines CI e run de deploy | Testes, imagens, OIDC, publicação ECR e rollout Kubernetes **somente se o run real tiver passado**. |
+| 5–8 min | Console AWS e `kubectl get pods,svc,hpa` | EC2/K3s, RDS, DynamoDB, SQS/DLQ e três pods prontos; mostrar SHA de imagem e healthchecks. |
+| 8–12 min | `./scripts/demo-fase4.ps1 -SkipBuild` ou evidência de smoke AWS | OS, trace, CPF/JWT, Saga até execução com pagamento simulado; explicar uma compensação. |
+| 12–14 min | Grafana/traces e alerta | Métricas de negócio, correlação distribuída e falha observável. |
+| 14–15 min | [Plano](implementation-plan.md) | Custos da janela curta, pendências honestas e encerramento. |
 
 ## Contingência e limites
 
-Se o ambiente demorar a iniciar, usar a última execução registrada em `docs/evidence/demo-local.json`, mostrar os containers já ativos e executar apenas o teste focado. O arquivo de evidência registra verificações, mas não substitui a demonstração ao vivo.
+Se AWS não estiver implantada, mostrar o `deploy-kind.yml` e `phase4-local.yml` executados no GitHub Actions; usar a última execução registrada em `docs/evidence/demo-local.json` e o demo Docker para funcionalidade. O arquivo de evidência registra verificações, mas não substitui a demonstração ao vivo. Se o script completo demorar, destacar os containers já ativos e o teste focado.
 
-Esta demonstração roda **localmente**. O teste de Saga usa provedor de pagamento simulado. Os manifests K3s foram verificados estaticamente, mas não houve implantação AWS/K3s, transação real de testes no Mercado Pago, publicação dos repositórios separados nem comprovação da cobertura acadêmica por serviço. Esses itens permanecem no backlog de `docs/implementation-plan.md`.
+O teste de Saga usa provedor de pagamento simulado. No estado atual, K3s foi verificado estaticamente, mas não houve implantação AWS, transação real de testes no Mercado Pago, publicação dos repositórios separados nem comprovação da cobertura acadêmica por serviço. Só atualizar essa afirmação após evidência remota. O passo a passo manual está em [preparação GitHub/AWS](runbooks/preparacao-github-aws.md).

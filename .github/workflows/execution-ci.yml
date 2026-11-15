@@ -1,0 +1,33 @@
+name: execution-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ['services/Oficina.Execution/**', 'services/Oficina.Execution.Tests/**', 'global.json', '.github/workflows/execution-ci.yml']
+  pull_request:
+    branches: [main]
+    paths: ['services/Oficina.Execution/**', 'services/Oficina.Execution.Tests/**', 'global.json', '.github/workflows/execution-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Execution tests
+        run: dotnet test services/Oficina.Execution.Tests --configuration Release --logger trx --results-directory test-results/execution
+      - name: Build Execution container
+        run: docker build -f services/Oficina.Execution/Dockerfile -t oficina-execution:${{ github.sha }} .
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-test-results
+          path: test-results/**/*.trx
+          if-no-files-found: ignore

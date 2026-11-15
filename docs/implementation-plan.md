@@ -1,17 +1,27 @@
 # Plano de implementação — Tech Challenge Fases 3 e 4
 
-Atualizado em 15/11/2026. Estado: **plano de apresentação de dois dias em execução**. O plano amplo abaixo permanece como histórico e backlog; a seção seguinte define a prioridade vigente. Este documento é a fonte de progresso, decisões, pendências e próximos passos.
+Atualizado em 15/11/2026. Estado: **plano acelerado de dois dias em execução**. O plano amplo abaixo permanece como referência; a seção seguinte define a ordem vigente. Este documento é a fonte de progresso, decisões, pendências e próximos passos.
 
-## Plano vigente: apresentação em dois dias
+## Plano vigente: entrega demonstrável em dois dias
 
-**Objetivo:** demonstrar em até 15 minutos um fluxo real e reproduzível no Docker Desktop: OS, Execução e Billing independentes; Saga por filas; autenticação de cliente pelo adaptador da Lambda; dashboard e alerta. Pagamento e estorno no cenário automatizado usam provedor simulado e serão identificados assim. Não declarar AWS, Mercado Pago real, cobertura por serviço ou repositórios separados como concluídos.
+**Objetivo:** mostrar em 15 minutos CI/CD no GitHub Actions e, se os pré-requisitos de conta e autorização estiverem prontos, três serviços rodando em K3s/AWS por uma janela curta. A demonstração Docker já validada complementa a prova de Saga, autenticação e observabilidade. Pagamento/estorno simulado será identificado como tal. O plano acadêmico permanece, mas só itens verificados serão apresentados como concluídos.
 
-| Quando | Entrega focada | Critério de saída |
+| Ordem / prazo alvo | Responsável | Ação e como verificar |
 |---|---|---|
-| Dia 1 | Roteiro único de smoke local, com OS chegando a `AwaitingApproval`, token por CPF, tracking protegido, teste focado da Saga até execução e dashboard | Um comando repetível, sem edição manual de banco ou mensagens; resultados e URLs claros |
-| Dia 2 | Ensaiar o roteiro de 15 minutos, conferir testes essenciais, preparar evidências e um caminho de contingência com saídas já registradas | Duas execuções consecutivas verdes e roteiro curto documentado |
+| 1. Agora, 1–2 h | Assistente | Três workflows CI separados para OS, Execução e Billing criados; 61+24 testes OS, 11 Execução e 10 Billing passaram; três imagens Docker construídas. Execução remota dos workflows ainda pendente. Não depende da AWS. |
+| 2. Dia 1, 1–2 h | Usuário | Confirmar conta/região AWS, limite de gasto, acesso GitHub e autorizar explicitamente publicação dos repositórios e criação dos recursos pagos. Criar AWS Budget com alerta baixo antes de `apply`; enviar apenas IDs/nomes, nunca credenciais no chat ou Git. |
+| 3. Dia 1, 3–5 h | Assistente | Preparar Terraform econômico: EC2/K3s de um nó, ECR, RDS PostgreSQL com dois bancos, DynamoDB, SQS/DLQ, IAM/OIDC, segurança e segredos. Rodar `fmt`, `validate`, `plan`; mostrar o plan e custo antes de pedir autorização para `apply`. |
+| 4. Dia 1–2, 2–3 h | Usuário + assistente | Preparar extração dos três repos preservando histórico; publicar após autorização, ativar Actions e branch protection. Adaptar caminhos dos workflows aos novos repos e confirmar três runs verdes. |
+| 5. Dia 2, 3–5 h | Assistente, após autorização | Aplicar Terraform, publicar imagens no ECR via OIDC, implantar em K3s via Actions, fazer smoke de `/health/ready`, `kubectl get pods,hpa` e registrar evidência no console AWS/Actions. Não habilitar endpoint público sem TLS/controle de acesso. |
+| 6. Dia 2, 1–2 h | Usuário + assistente | Ensaiar demonstração de 15 min, salvar capturas e desligar/remover recursos conforme autorização explícita. Verificar cobrança residual de EBS/RDS/IPv4/ECR. |
 
-**Corte de escopo para estes dois dias:** não iniciar Terraform AWS, publicação de repositórios, deploy pago, integração real Mercado Pago, implantação K3s ou nova arquitetura. Os manifests e o plano amplo permanecem no repositório para uma continuação posterior. A apresentação mostrará o que funciona localmente e indicará de forma objetiva o que ainda não foi validado em AWS. Nenhum recurso pago ou publicação será feito sem autorização explícita.
+**Ordem crítica:** conta/orçamento → Terraform validado → autorização de `apply` e publicação → IAM OIDC/ECR → três imagens → K3s + bancos/filas → deploy Actions → smoke/evidências → desligamento. Preparar AWS leva mais que uma hora; limitar a **janela de apresentação com cluster ligado** a cerca de uma hora, prevendo provisionamento e smoke antes. O orçamento anterior de US$8–25 para um mês de demonstração é apenas estimativa histórica: revisar preços na região escolhida e o `terraform plan` antes de aplicar. RDS, armazenamento, IPv4, snapshots, ECR e logs podem gerar custo mesmo com EC2 parada.
+
+**Trabalho manual do usuário, na ordem:** (1) confirmar acesso administrador temporário à conta AWS e repositórios GitHub; (2) criar AWS Budget/alerta e escolher região; (3) autorizar criação/publicação dos três repositórios e fornecer nomes/owner; (4) após receber o Terraform plan, autorizar `apply` com valor e janela; (5) configurar credenciais Mercado Pago **de testes** em Secrets Manager somente se quiser demonstrar pagamento real; (6) na apresentação, abrir as telas Actions, EC2/RDS/DynamoDB/SQS e K3s preparadas; (7) autorizar desligamento/destroy e conferir Cost Explorer no dia seguinte. O procedimento detalhado e as verificações estão em `docs/runbooks/preparacao-github-aws.md`. O assistente prepara código, infraestrutura e comandos antes de cada ato autorizado. Nenhuma chave estática AWS será guardada no GitHub; usar OIDC.
+
+**Prioridade para nota:** (1) três serviços, bancos separados e Saga/compensação funcionando; (2) três pipelines com testes e imagem, deploy Kubernetes e recursos AWS visíveis; (3) JWT via Lambda, gateway, tracing/métricas; (4) qualidade, BDD, segurança e custo; (5) integração Mercado Pago em sandbox, se credenciais e callback forem viáveis. Divisão física em três repositórios e evidência de branch protection continuam obrigatórias no enunciado, mas exigem a etapa manual de publicação. Nunca afirmar requisitos não comprovados.
+
+**Contingência se acesso/autorização AWS não chegar a tempo:** executar `deploy-kind.yml` no GitHub Actions para mostrar CI/CD e Kubernetes reais no runner, `phase4-local.yml` para Saga/BDD, e o demo Docker para APIs/observabilidade. Mostrar Terraform `validate/plan` quando disponível e declarar que AWS não foi aplicado. Isso preserva uma demonstração honesta, embora com lacuna acadêmica.
 
 ## Decisão executiva
 
@@ -171,4 +181,4 @@ Estimativa de progresso em 14/11/2026: **aproximadamente 55% do escopo total imp
 
 O commit `9d78c01` registra os manifests K3s dos três serviços. O foco atual é a apresentação local definida no início deste documento. `scripts/demo-fase4.ps1 -SkipBuild` passou duas vezes em 15/11/2026 e registrou a última execução em `docs/evidence/demo-local.json`: OS em `AwaitingApproval`, trace, tracking autenticado, teste focado da Saga com provedor simulado (1 aprovado, 0 falhas) e nove painéis do Grafana. O roteiro está em `docs/demo-15-min.md`. A execução sem acesso ao Docker foi descartada; a repetição com acesso ao Docker Desktop passou.
 
-**Próxima etapa dos dois dias:** ensaiar o roteiro cronometrado e guardar capturas mínimas da demonstração. Se houver falha, corrigir somente o caminho crítico do demo. Depois, apresentar os itens acadêmicos ainda pendentes como backlog, sem afirmar que foram concluídos. Nenhum recurso AWS pago ou repositório remoto será criado sem autorização explícita.
+**Próxima etapa dos dois dias:** concluir a validação dos três workflows locais, preparar Terraform AWS e pipeline OIDC/ECR/deploy como código, executar `terraform validate/plan` e apresentar o plan concreto antes de qualquer `apply`. Em paralelo, o usuário prepara conta/região/orçamento e autorização de publicação conforme o runbook. Ensaiar o roteiro cronometrado após haver evidência remota. Nenhum recurso AWS pago ou repositório remoto será criado sem autorização explícita.
