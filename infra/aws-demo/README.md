@@ -8,9 +8,9 @@ Na janela da demo, `scripts/aws-demo/prepare-workload-credentials.sh` obtém cre
 
 O Terraform também cria três entradas vazias no Secrets Manager. `scripts/aws-demo/bootstrap-rds-and-app-secrets.sh` cria os databases e usuários `oficina_os`/`oficina_execution`, grava senhas e tokens fora do Terraform state e prepara os Secrets Kubernetes de aplicação. O nó K3s pode ler o segredo mestre gerenciado pelo RDS e gravar apenas essas três entradas; a role do Billing continua sem acesso a segredos. A criação dos bancos e a distribuição de credenciais ainda não foram executadas em EC2 real.
 
-Três documentos SSM de deploy recebem somente um SHA Git válido, atualizam a imagem do Deployment correspondente e verificam o rollout. Cada role OIDC pode executar apenas seu documento no nó K3s e consultar o resultado. Os workflows de CI chamam esses documentos após publicar ECR. **O primeiro deploy ainda depende de copiar/executar os scripts de bootstrap, criar Secrets e aplicar os manifests uma vez**; o pipeline incremental não faz esse bootstrap.
+Três documentos SSM de deploy recebem somente um SHA Git válido, atualizam a imagem do Deployment correspondente e verificam o rollout. Cada role OIDC pode executar apenas seu documento no nó K3s e consultar o resultado. Os workflows de CI chamam esses documentos após publicar ECR. Para o primeiro deploy, um bucket S3 privado recebe um pacote curto de scripts/manifests (objetos expiram em dois dias); a role do nó pode somente ler `demo/*`. `scripts/aws-demo/package-deployment.ps1` gera o pacote a partir dos outputs do Terraform. Após o upload e conferência do SHA256, `initial-deploy.sh` prepara RDS/Secrets e injeta região, tabela, URLs SQS e imagens ECR publicadas no Kustomize antes de aplicar.
 
-Ainda faltam estado remoto, transporte dos scripts/manifests ao nó e smoke de API no deploy. **Não executar `apply`** nesta versão parcial; ela não sobe a aplicação. Nenhum recurso AWS foi criado.
+Ainda faltam estado remoto, upload/execução real do pacote e smoke HTTP de API; scripts e K3s não foram testados em EC2. **Não executar `apply`** antes do plan revisado e da autorização; nenhum recurso AWS foi criado.
 
 ```powershell
 terraform -chdir=infra/aws-demo fmt -check

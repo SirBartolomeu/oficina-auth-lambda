@@ -62,3 +62,13 @@ output "ssm_deploy_document_names" {
   description = "Documentos SSM restritos aos Deployments de cada serviço."
   value       = { for name, document in aws_ssm_document.deploy_service : name => document.name }
 }
+
+output "deployment_assets_bucket" {
+  description = "Bucket privado para o pacote inicial de scripts e manifests; objetos expiram em dois dias."
+  value       = aws_s3_bucket.deployment_assets.bucket
+}
+
+output "aws_region" {
+  description = "Região única usada pelo bootstrap."
+  value       = var.aws_region
+}

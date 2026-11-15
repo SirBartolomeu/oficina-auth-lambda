@@ -75,7 +75,7 @@ data "aws_iam_policy_document" "k3s_host_pull_and_assume" {
     resources = ["*"]
   }
   statement {
-    actions   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+    actions   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:DescribeImages"]
     resources = [for repo in aws_ecr_repository.service : repo.arn]
   }
   statement {
