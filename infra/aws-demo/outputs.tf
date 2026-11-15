@@ -12,3 +12,23 @@ output "billing_table_name" {
   description = "Tabela própria do Billing."
   value       = aws_dynamodb_table.billing.name
 }
+
+output "rds_endpoint" {
+  description = "Endpoint privado; criar os bancos e usuários próprios de OS e Execução no bootstrap."
+  value       = aws_db_instance.postgres.address
+}
+
+output "rds_master_secret_arn" {
+  description = "Segredo gerenciado pelo RDS; não imprimir o valor da senha."
+  value       = aws_db_instance.postgres.master_user_secret[0].secret_arn
+}
+
+output "k3s_security_group_id" {
+  description = "Security group para a futura instância EC2/K3s."
+  value       = aws_security_group.k3s.id
+}
+
+output "k3s_subnet_id" {
+  description = "Subnet pública para o futuro nó K3s acessado via SSM."
+  value       = aws_subnet.public.id
+}

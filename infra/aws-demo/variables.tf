@@ -13,3 +13,9 @@ variable "name_prefix" {
     error_message = "Use 3 a 40 letras minúsculas, números ou hífens."
   }
 }
+
+variable "rds_instance_class" {
+  description = "Classe RDS Single-AZ da demonstração; confirmar disponibilidade e preço na região antes do apply."
+  type        = string
+  default     = "db.t4g.micro"
+}

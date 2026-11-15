@@ -1,6 +1,8 @@
 # Terraform AWS da demonstração — em construção
 
-Este primeiro incremento define três ECR, três filas SQS com DLQ e uma tabela DynamoDB `PAY_PER_REQUEST`. Ainda faltam EC2/K3s, RDS, IAM/OIDC, segredos, estado remoto e pipelines de deploy. **Não executar `apply`** nesta versão parcial; ela não sobe a aplicação. Nenhum recurso AWS foi criado.
+O módulo define três ECR, três filas SQS com DLQ, uma tabela DynamoDB `PAY_PER_REQUEST`, VPC, subnet pública para o futuro nó K3s, duas subnets privadas em zonas distintas e RDS PostgreSQL Single-AZ. O RDS só aceita PostgreSQL do security group K3s e usa senha mestre gerenciada pelo RDS/Secrets Manager. Não há NAT Gateway. A subnet pública ainda não contém EC2 e não há regra de entrada pública.
+
+Ainda faltam EC2/K3s, criação dos databases e usuários `oficina_os`/`oficina_execution` dentro do RDS, IAM/OIDC, segredos por serviço, estado remoto e pipelines de deploy. **Não executar `apply`** nesta versão parcial; ela não sobe a aplicação. Nenhum recurso AWS foi criado.
 
 ```powershell
 terraform -chdir=infra/aws-demo fmt -check
@@ -9,4 +11,4 @@ terraform -chdir=infra/aws-demo validate
 terraform -chdir=infra/aws-demo plan -var='aws_region=us-east-1'
 ```
 
-O `plan` consulta a conta AWS configurada e só deve ser executado após a escolha da conta/região. Não guardar credenciais ou `tfstate` no Git. O estado remoto e o plano completo serão definidos antes de pedir autorização para `apply`. Os nomes/URLs de saída alimentarão os manifests K3s. A política ECR retém cinco imagens por serviço para limitar armazenamento, mas não apaga os repositórios durante um `destroy` se ainda houver imagens.
+O `plan` consulta a conta AWS configurada e só deve ser executado após a escolha da conta/região. Confirmar se `db.t4g.micro` e `gp3` estão disponíveis e o preço real da região escolhida. Não guardar credenciais ou `tfstate` no Git. O estado remoto e o plano completo serão definidos antes de pedir autorização para `apply`. Os nomes/URLs de saída alimentarão os manifests K3s. A política ECR retém cinco imagens por serviço para limitar armazenamento, mas não apaga os repositórios durante um `destroy` se ainda houver imagens. O RDS foi configurado para pular snapshot final em um eventual `destroy` autorizado; produzir backup se for necessário conservar dados antes desse ato.
