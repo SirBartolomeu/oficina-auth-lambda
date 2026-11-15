@@ -9,6 +9,9 @@ using Oficina.Execution.Contracts;
 using Oficina.Execution.Persistence;
 using OficinaMvp.Domain.Entities;
 using OficinaMvp.Domain.Exceptions;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
@@ -19,6 +22,37 @@ builder.Logging.AddJsonConsole(options =>
     options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
 });
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
+var otlpEndpoint = builder.Configuration["Observability:OtlpEndpoint"];
+if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+{
+    if (!Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var endpoint) ||
+        endpoint.Scheme is not ("http" or "https"))
+        throw new InvalidOperationException("Observability:OtlpEndpoint deve ser uma URL HTTP válida.");
+    var sampleRatio = builder.Configuration.GetValue<double?>("Observability:TraceSampleRatio") ?? 0.1;
+    if (sampleRatio is < 0 or > 1)
+        throw new InvalidOperationException("Observability:TraceSampleRatio deve estar entre 0 e 1.");
+    var metricIntervalSeconds = builder.Configuration.GetValue<int?>(
+        "Observability:MetricExportIntervalSeconds") ?? 60;
+    if (metricIntervalSeconds is < 5 or > 300)
+        throw new InvalidOperationException(
+            "Observability:MetricExportIntervalSeconds deve estar entre 5 e 300.");
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(resource => resource.AddService("oficina-execution"))
+        .WithTracing(tracing => tracing
+            .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(sampleRatio)))
+            .AddAspNetCoreInstrumentation(options =>
+                options.Filter = context => !context.Request.Path.StartsWithSegments("/health"))
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter(options => options.Endpoint = endpoint))
+        .WithMetrics(metrics => metrics
+            .AddAspNetCoreInstrumentation()
+            .AddOtlpExporter((options, readerOptions) =>
+            {
+                options.Endpoint = endpoint;
+                readerOptions.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds =
+                    metricIntervalSeconds * 1000;
+            }));
+}
 var provider = builder.Configuration["Database:Provider"] ?? "Sqlite";
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection é obrigatória.");

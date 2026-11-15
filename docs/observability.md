@@ -34,4 +34,10 @@ Para verificar localmente: `docker compose -f docker-compose.yml -f compose.gate
 
 Fixamos os pacotes OpenTelemetry em 1.20.1: 1.21.0 causou conflito de `System.Diagnostics.DiagnosticSource` 11 com o runtime .NET 10 deste projeto. Fontes: [guia oficial de traces](https://opentelemetry.io/docs/languages/dotnet/traces/getting-started-aspnetcore/), [métricas](https://opentelemetry.io/docs/languages/dotnet/metrics/getting-started-aspnetcore/), [instalação do Collector](https://opentelemetry.io/docs/collector/install/docker/) e [configuração](https://opentelemetry.io/docs/collector/configuration/).
 
-Ainda faltam exportação OTLP de Execução/Billing, instrumentação exportável das atividades SQS, métricas de negócio, correlação da Lambda, dashboards e alertas.
+## Sétimo incremento: exportação OTLP da Execução e Billing
+
+Execução e Billing usam a mesma configuração opt-in da OS, com os nomes de recurso `oficina-execution` e `oficina-billing`. O overlay `compose.telemetry.yml` aponta os três serviços ao Collector local, com 100% de amostragem apenas para demonstração. Sem `Observability:OtlpEndpoint`, não há exportação OTLP. A criação automática da tabela Billing em Development também tolera `ResourceInUseException` quando outra instância a criou entre a listagem e a criação.
+
+Validação local: `docker compose -f docker-compose.yml -f compose.execution.yml -f compose.billing.yml -f compose.telemetry.yml up -d --build execution-api billing-api otel-collector`. Requisições sem token a `/internal/catalog/services` na porta 8081 e a `/internal/budgets/{workOrderId}/{version}` na porta 8082 retornaram 401. O Collector registrou um span de cada serviço e exportações periódicas de métricas HTTP; 11 testes da Execução e 13 testes DynamoDB Billing passaram.
+
+Ainda faltam instrumentação exportável das atividades SQS, métricas de negócio, correlação da Lambda, dashboards e alertas.
