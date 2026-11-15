@@ -7,7 +7,7 @@ Execute na ordem. O assistente prepara Terraform, workflows e extração dos rep
 1. Entre na conta AWS que usará na apresentação e escolha **uma região** para todos os recursos. Anote somente o ID da conta (12 dígitos) e a região, sem chaves.
 2. Em **Billing and Cost Management → Budgets → Create budget**, crie um orçamento mensal pequeno, com alerta por e-mail para o valor que você aceita gastar. Budget **avisa, não impede gastos**; confirme o e-mail e monitore o painel. [Passos oficiais AWS](https://docs.aws.amazon.com/cost-management/latest/userguide/bcm-lite-create-a-budget.html).
 3. Confirme que você tem permissão temporária para criar IAM OIDC, EC2, ECR, RDS, DynamoDB, SQS, VPC, S3, Secrets Manager e orçamento. Se for conta de organização, peça ao administrador essas permissões. O `terraform plan` apontará a lista concreta.
-4. Informe ao assistente **região, ID da conta, teto de gasto e janela da apresentação**. Ele preparará e validará o plan. Autorize `terraform apply` só depois de revisar recursos e custo. Uma hora de apresentação não inclui o tempo de criação/migração do RDS.
+4. Informe ao assistente **região, ID da conta, teto de gasto e janela da apresentação**. O backend remoto está preparado, mas precisa de um bucket S3 privado de estado, com versionamento, criptografia e bloqueio de acesso público; autorize sua criação antes do primeiro `terraform init` remoto. Copie `infra/aws-demo/backend.hcl.example` para `infra/aws-demo/backend.hcl` e preencha bucket/região, sem chaves. Autentique o CLI por AWS SSO/profile temporário. O assistente validará o `plan`; autorize `terraform apply` só depois de revisar recursos e custo. Uma hora de apresentação não inclui o tempo de criação/migração do RDS.
 
 ## 2. Repositórios e GitHub Actions
 

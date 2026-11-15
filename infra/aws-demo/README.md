@@ -10,13 +10,16 @@ O Terraform também cria três entradas vazias no Secrets Manager. `scripts/aws-
 
 Três documentos SSM de deploy recebem somente um SHA Git válido, atualizam a imagem do Deployment correspondente e verificam o rollout. Cada role OIDC pode executar apenas seu documento no nó K3s e consultar o resultado. Os workflows de CI chamam esses documentos após publicar ECR. Para o primeiro deploy, um bucket S3 privado recebe um pacote curto de scripts/manifests (objetos expiram em dois dias); a role do nó pode somente ler `demo/*`. `scripts/aws-demo/package-deployment.ps1` gera o pacote a partir dos outputs do Terraform. Após o upload e conferência do SHA256, `initial-deploy.sh` prepara RDS/Secrets e injeta região, tabela, URLs SQS e imagens ECR publicadas no Kustomize antes de aplicar.
 
-Ainda faltam estado remoto, upload/execução real do pacote e smoke HTTP de API; scripts e K3s não foram testados em EC2. **Não executar `apply`** antes do plan revisado e da autorização; nenhum recurso AWS foi criado.
+Ainda faltam criar o bucket de estado autorizado, inicializar o backend remoto e executar upload/deploy/smoke reais; scripts e K3s não foram testados em EC2. **Não executar `apply`** antes do plan revisado e da autorização; nenhum recurso AWS foi criado.
+
+O backend S3 está declarado, mas depende de um bucket privado criado fora deste módulo antes do primeiro `init` remoto. Copie `backend.hcl.example` para `backend.hcl` (ignorado pelo Git), escolha bucket/região e mantenha versionamento e bloqueio público no bucket. O lock usa um objeto `.tflock`, sem tabela DynamoDB adicional. A credencial local deve vir de AWS SSO/profile temporário; não usar access keys no arquivo. O bucket de estado permanece fora do `destroy` do ambiente e só deve ser removido após guardar ou descartar conscientemente o estado.
 
 ```powershell
 terraform -chdir=infra/aws-demo fmt -check
 terraform -chdir=infra/aws-demo init -backend=false
 terraform -chdir=infra/aws-demo validate
+terraform -chdir=infra/aws-demo init -backend-config=backend.hcl
 terraform -chdir=infra/aws-demo plan -var='aws_region=REGIAO_ESCOLHIDA' -var='github_owner=SEU_OWNER'
 ```
 
-O `plan` consulta a conta AWS configurada e só deve ser executado após a escolha da conta/região e nomes finais dos repositórios. Confirmar se `db.t4g.micro` e `gp3` estão disponíveis e o preço real da região escolhida. Não guardar credenciais ou `tfstate` no Git. O estado remoto e o plano completo serão definidos antes de pedir autorização para `apply`. Os nomes/URLs de saída alimentarão os manifests K3s. A política ECR retém cinco imagens por serviço para limitar armazenamento, mas não apaga os repositórios durante um `destroy` se ainda houver imagens. O RDS foi configurado para pular snapshot final e os três segredos para remoção sem recuperação em um eventual `destroy` autorizado; produzir backup se for necessário conservar dados antes desse ato.
+O `plan` consulta a conta AWS configurada e só deve ser executado após a escolha da conta/região e nomes finais dos repositórios. Confirmar se `db.t4g.micro` e `gp3` estão disponíveis e o preço real da região escolhida. Não guardar credenciais ou `tfstate` no Git. Os nomes/URLs de saída alimentarão os manifests K3s. A política ECR retém cinco imagens por serviço para limitar armazenamento, mas não apaga os repositórios durante um `destroy` se ainda houver imagens. O RDS foi configurado para pular snapshot final e os três segredos para remoção sem recuperação em um eventual `destroy` autorizado; produzir backup se for necessário conservar dados antes desse ato.
