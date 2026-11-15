@@ -23,7 +23,10 @@ public sealed class SqsIntegrationMessageSender : IIntegrationMessageSender
     {
         if (!_queueUrls.TryGetValue(eventType, out var queueUrl) || string.IsNullOrWhiteSpace(queueUrl))
             throw new InvalidOperationException($"Fila SQS não configurada para {eventType}.");
-        using var activity = new Activity("SQS publish").SetIdFormat(ActivityIdFormat.W3C).Start();
+        using var activity = new Activity("SQS publish").SetIdFormat(ActivityIdFormat.W3C);
+        var storedParent = SqsTraceContext.Read(payloadJson);
+        if (storedParent is not null) activity.SetParentId(storedParent);
+        activity.Start();
         var request = new SendMessageRequest
         {
             QueueUrl = queueUrl,

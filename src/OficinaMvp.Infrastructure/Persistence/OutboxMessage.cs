@@ -1,3 +1,5 @@
+using OficinaMvp.Infrastructure.Messaging;
+
 namespace OficinaMvp.Infrastructure.Persistence;
 
 public sealed class OutboxMessage
@@ -8,7 +10,7 @@ public sealed class OutboxMessage
     {
         EventId = eventId;
         EventType = eventType;
-        PayloadJson = payloadJson;
+        PayloadJson = SqsTraceContext.Stamp(payloadJson);
         OccurredAtUtc = occurredAtUtc;
     }
 

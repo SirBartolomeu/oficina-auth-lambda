@@ -16,4 +16,8 @@ Execução e Billing também emitem JSON no stdout em UTC. Os três consumidores
 
 Os publicadores OS, Execução e Billing criam uma atividade W3C e enviam seu `traceparent` no atributo da mensagem SQS. Os três consumidores solicitam esse atributo, validam o formato e retomam uma atividade filha antes de executar o handler. Se o atributo estiver ausente ou inválido, a mensagem continua sendo processada com uma nova atividade. Um teste com ElasticMQ confirmou que o atributo recebido contém o mesmo trace ID da atividade emissora; 11 testes locais da Saga passaram.
 
-A Outbox durável ainda não grava o contexto da requisição/consumo original: o dispatcher em segundo plano inicia um novo trace ao publicar. Assim, cada salto publicação→consumo está ligado, mas o trace completo da OS até o fim da Saga **ainda não** está implementado. Faltam persistir o contexto na Outbox, exportar spans e métricas, correlacionar a Lambda, dashboards e alertas. O custo de logs na AWS dependerá de volume e retenção; configurar retenção curta e limites antes do deploy.
+## Quarto incremento: contexto durável na Outbox da OS
+
+A OS grava `traceparent` como metadado opcional no JSON da Outbox, na mesma transação da OS. O dispatcher retoma esse contexto antes de publicar na SQS. Um teste salvou a Outbox em SQLite, encerrou a atividade da requisição, releu o registro e confirmou no ElasticMQ o mesmo trace ID; os 12 testes locais de mensageria e os 23 testes de integração da OS passaram. O campo extra não altera os campos obrigatórios do contrato de evento.
+
+Execução e Billing ainda iniciam um novo trace ao publicar suas Outboxes em segundo plano. Portanto, o trace completo da OS até o fim da Saga **ainda não** está implementado. Faltam persistir o contexto nas duas Outboxes, exportar spans e métricas, correlacionar a Lambda, dashboards e alertas. O custo de logs na AWS dependerá de volume e retenção; configurar retenção curta e limites antes do deploy.
