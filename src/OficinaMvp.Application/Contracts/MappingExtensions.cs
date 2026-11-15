@@ -5,7 +5,7 @@ namespace OficinaMvp.Application.Contracts;
 public static class MappingExtensions
 {
     public static CustomerResponse ToResponse(this Customer customer) =>
-        new(customer.Id, customer.Name, customer.Document, customer.Phone, customer.Email);
+        new(customer.Id, customer.Name, customer.Document, customer.Phone, customer.Email, customer.IsActive);
 
     public static VehicleResponse ToResponse(this Vehicle vehicle) =>
         new(vehicle.Id, vehicle.CustomerId, vehicle.LicensePlate, vehicle.Brand, vehicle.Model, vehicle.Year);

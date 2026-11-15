@@ -137,7 +137,7 @@ Token de integracao externa:
 Administrativos com JWT:
 
 - `POST /api/auth/token`
-- CRUD `/api/customers`
+- `/api/customers`: cadastro, consulta, atualização e `DELETE /{id}` para inativar sem apagar o histórico; a resposta inclui `isActive`
 - CRUD `/api/vehicles`
 - CRUD `/api/services`
 - CRUD `/api/parts`
