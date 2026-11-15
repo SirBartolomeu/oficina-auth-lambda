@@ -54,11 +54,17 @@ public sealed class BillingSqsWorker(
                             await scope.ServiceProvider.GetRequiredService<WorkOrderOpenedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "CreatePaymentRequested")
-                            await scope.ServiceProvider.GetRequiredService<PaymentRequestHandler>()
+                        {
+                            var accepted = await scope.ServiceProvider.GetRequiredService<PaymentRequestHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                            if (accepted) BillingMetrics.RecordAcceptedCommand(eventType);
+                        }
                         else if (eventType == "RefundPaymentRequested")
-                            await scope.ServiceProvider.GetRequiredService<RefundRequestHandler>()
+                        {
+                            var accepted = await scope.ServiceProvider.GetRequiredService<RefundRequestHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
+                            if (accepted) BillingMetrics.RecordAcceptedCommand(eventType);
+                        }
                         else
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);

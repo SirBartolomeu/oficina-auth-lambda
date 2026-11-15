@@ -43,6 +43,7 @@ if (!string.IsNullOrWhiteSpace(otlpEndpoint))
             .AddHttpClientInstrumentation()
             .AddOtlpExporter(options => options.Endpoint = endpoint))
         .WithMetrics(metrics => metrics
+            .AddMeter(BillingMetrics.MeterName)
             .AddAspNetCoreInstrumentation()
             .AddOtlpExporter((options, readerOptions) =>
             {

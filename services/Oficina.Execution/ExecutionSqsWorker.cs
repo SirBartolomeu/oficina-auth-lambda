@@ -46,20 +46,22 @@ public sealed class ExecutionCommandsWorker(IAmazonSQS sqs, IServiceScopeFactory
                             ["correlationId"] = correlationId,
                             ["workOrderId"] = root.GetProperty("workOrderId").GetString()
                         });
+                        bool applied;
                         if (eventType == "ReserveStockRequested")
-                            await scope.ServiceProvider.GetRequiredService<ReserveStockRequestedHandler>()
+                            applied = await scope.ServiceProvider.GetRequiredService<ReserveStockRequestedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "ReleaseStockRequested")
-                            await scope.ServiceProvider.GetRequiredService<ReleaseStockRequestedHandler>()
+                            applied = await scope.ServiceProvider.GetRequiredService<ReleaseStockRequestedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "ConsumeStockRequested")
-                            await scope.ServiceProvider.GetRequiredService<ConsumeStockRequestedHandler>()
+                            applied = await scope.ServiceProvider.GetRequiredService<ConsumeStockRequestedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else if (eventType == "ExecutionRequested")
-                            await scope.ServiceProvider.GetRequiredService<ExecutionRequestedHandler>()
+                            applied = await scope.ServiceProvider.GetRequiredService<ExecutionRequestedHandler>()
                                 .HandleAsync(message.Body, stoppingToken);
                         else
                             throw new InvalidOperationException($"Comando não suportado: {eventType}");
+                        if (applied) ExecutionMetrics.RecordAppliedCommand(eventType);
                         await sqs.DeleteMessageAsync(queueUrl, message.ReceiptHandle, stoppingToken);
                         logger.LogInformation("Comando {EventType} processado na Execução", eventType);
                     }

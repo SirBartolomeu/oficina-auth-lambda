@@ -29,6 +29,7 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
                 Item = ToItem(proposed),
                 ConditionExpression = "attribute_not_exists(pk)"
             }, cancellationToken);
+            BillingMetrics.RecordBudgetCreated();
             return proposed;
         }
         catch (ConditionalCheckFailedException)
@@ -81,6 +82,7 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
                     } }
                 ]
             }, cancellationToken);
+            BillingMetrics.RecordBudgetCreated();
             return proposed;
         }
         catch (TransactionCanceledException)
@@ -702,6 +704,7 @@ public sealed class BillingRepository(IAmazonDynamoDB dynamo, IConfiguration con
                     } }
                 ]
             }, cancellationToken);
+            BillingMetrics.RecordBudgetDecided(approved);
             return updated;
         }
         catch (TransactionCanceledException)
