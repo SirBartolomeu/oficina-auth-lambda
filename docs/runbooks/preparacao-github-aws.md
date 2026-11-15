@@ -19,7 +19,7 @@ Execute na ordem. O assistente prepara Terraform, workflows e extração dos rep
 ## 3. Credenciais externas e deploy
 
 1. Se houver tempo e conta Mercado Pago de testes, obtenha Access Token e segredo de webhook **de testes** e configure-os no AWS Secrets Manager apenas após a infraestrutura existir. O callback precisa de URL HTTPS pública confiável. Sem isso, apresentar o pagamento simulado e dizer claramente que a transação externa não foi testada.
-2. Revise o `terraform plan` e autorize explicitamente o `apply`; depois valide no console: EC2/K3s, RDS, tabela DynamoDB, três filas SQS com DLQ e três repositórios ECR. A existência dos recursos não prova que os pods estão prontos: confirme `kubectl -n oficina get pods,svc,hpa`, readiness dos três serviços e smoke do fluxo.
+2. Revise o `terraform plan` e autorize explicitamente o `apply`; depois valide no console: EC2/K3s, RDS, tabela DynamoDB, três filas SQS com DLQ e três repositórios ECR. Em **EC2 → Instances → Connect → Session Manager**, entre no nó e execute `sudo k3s kubectl get nodes` e `sudo k3s kubectl -n oficina get pods,svc,hpa`. O security group não abre SSH; a existência dos recursos não prova que os pods estão prontos. Confirme readiness dos três serviços e smoke do fluxo.
 3. Rode os workflows de publicação/deploy quando preparados; guarde URL do run, SHA da imagem em cada ECR, `kubectl`/healthchecks e um trace/OS real. A demonstração local em `docs/evidence/demo-local.json` é evidência complementar.
 
 ## 4. Apresentação e encerramento

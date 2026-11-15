@@ -19,3 +19,15 @@ variable "rds_instance_class" {
   type        = string
   default     = "db.t4g.micro"
 }
+
+variable "k3s_instance_type" {
+  description = "Instância x86 com memória suficiente para três APIs e observabilidade na janela da demo."
+  type        = string
+  default     = "t3.large"
+}
+
+variable "k3s_version" {
+  description = "Versão fixada para reproduzir o bootstrap do K3s."
+  type        = string
+  default     = "v1.36.6+k3s1"
+}

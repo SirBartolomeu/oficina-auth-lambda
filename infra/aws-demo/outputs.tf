@@ -32,3 +32,8 @@ output "k3s_subnet_id" {
   description = "Subnet pública para o futuro nó K3s acessado via SSM."
   value       = aws_subnet.public.id
 }
+
+output "k3s_instance_id" {
+  description = "Usar no Session Manager ou Run Command; não há SSH público."
+  value       = aws_instance.k3s.id
+}
