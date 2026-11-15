@@ -1,7 +1,8 @@
 services:
   oficina-api:
     environment:
-      ConnectionStrings__DefaultConnection: Host=oficina-db;Port=5432;Database=oficina_saga_local;Username=oficina;Password=oficina-local-password
+      ConnectionStrings__DefaultConnection: Host=oficina-db;Port=5432;Database=oficina_saga_migrated_local;Username=oficina;Password=oficina-local-password
+      Database__UseMigrations: "true"
       Execution__BaseUrl: http://execution-api:8080
       Execution__InternalToken: execution-local-internal-token-only-123456
       Messaging__SqsServiceUrl: http://elasticmq:9324

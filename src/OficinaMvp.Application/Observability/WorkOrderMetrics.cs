@@ -12,6 +12,8 @@ public static class WorkOrderMetrics
         "sqs_message_processing_duration", "s");
     private static readonly Counter<long> MessageFailures = Meter.CreateCounter<long>("sqs_message_failures");
     private static readonly Counter<long> ReceiveFailures = Meter.CreateCounter<long>("sqs_receive_failures");
+    private static readonly Histogram<double> ProcessStateDuration = Meter.CreateHistogram<double>(
+        "work_order_process_state_duration", "s");
 
     public static void RecordOpened() => Opened.Add(1);
 
@@ -23,4 +25,7 @@ public static class WorkOrderMetrics
 
     public static void RecordSqsMessageFailure() => MessageFailures.Add(1);
     public static void RecordSqsReceiveFailure() => ReceiveFailures.Add(1);
+
+    public static void RecordProcessStateDuration(string state, double seconds) =>
+        ProcessStateDuration.Record(seconds, new KeyValuePair<string, object?>("state", state));
 }

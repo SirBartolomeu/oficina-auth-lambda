@@ -58,6 +58,7 @@ if (!string.IsNullOrWhiteSpace(otlpEndpoint))
             .AddOtlpExporter(options => options.Endpoint = endpoint))
         .WithMetrics(metrics => metrics
             .AddMeter(WorkOrderMetrics.MeterName)
+            .AddMeter("System.Runtime")
             .AddAspNetCoreInstrumentation()
             .AddOtlpExporter((options, readerOptions) =>
             {

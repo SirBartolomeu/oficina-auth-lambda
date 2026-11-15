@@ -209,6 +209,9 @@ namespace OficinaMvp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<DateTime?>("ProcessStateEnteredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("RefundRequestId")
                         .HasColumnType("uuid");
 

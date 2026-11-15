@@ -4,7 +4,7 @@
   "tags": ["oficina", "demo"],
   "timezone": "browser",
   "schemaVersion": 41,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": { "from": "now-1h", "to": "now" },
   "panels": [
@@ -49,6 +49,27 @@
       "targets": [{ "expr": "sum by (decision) (increase(billing_budgets_decided_total[1h]))", "refId": "A", "legendFormat": "{{decision}}" }],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Tempo por estado da OS, p95 (1 h)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, state) (rate(work_order_process_state_duration_seconds_bucket[1h])))", "refId": "A", "legendFormat": "{{state}}" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "CPU dos processos .NET (núcleos, 5 min)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (service_name) (rate(dotnet_process_cpu_time_seconds_total[5m]))", "refId": "A", "legendFormat": "{{service_name}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Memória dos processos .NET",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (service_name) (dotnet_process_memory_working_set_bytes)", "refId": "A", "legendFormat": "{{service_name}}" }],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 }
     }
   ]
 }

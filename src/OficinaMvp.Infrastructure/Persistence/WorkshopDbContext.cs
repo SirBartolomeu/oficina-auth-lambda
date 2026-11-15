@@ -3,6 +3,8 @@ using OficinaMvp.Domain.Entities;
 
 namespace OficinaMvp.Infrastructure.Persistence;
 
+using OficinaMvp.Application.Observability;
+
 public sealed class WorkshopDbContext : DbContext
 {
     public WorkshopDbContext(DbContextOptions<WorkshopDbContext> options) : base(options)
@@ -16,6 +18,32 @@ public sealed class WorkshopDbContext : DbContext
     public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        ChangeTracker.DetectChanges();
+        var durations = ChangeTracker.Entries<WorkOrder>()
+            .Where(entry => entry.State == EntityState.Modified &&
+                            entry.Property(order => order.ProcessState).IsModified)
+            .Select(entry => new
+            {
+                PreviousState = entry.Property(order => order.ProcessState).OriginalValue,
+                EnteredAt = entry.Property(order => order.ProcessStateEnteredAtUtc).OriginalValue,
+                LeftAt = entry.Entity.ProcessStateEnteredAtUtc
+            })
+            .Where(item => item.EnteredAt.HasValue && item.LeftAt > item.EnteredAt)
+            .ToArray();
+
+        var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        foreach (var duration in durations)
+        {
+            WorkOrderMetrics.RecordProcessStateDuration(duration.PreviousState.ToString(),
+                (duration.LeftAt!.Value - duration.EnteredAt!.Value).TotalSeconds);
+        }
+
+        return saved;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -87,6 +115,7 @@ public sealed class WorkshopDbContext : DbContext
             entity.Property(order => order.Status).HasConversion<string>().HasMaxLength(40);
             entity.Property(order => order.ProcessState).HasConversion<string>()
                 .HasMaxLength(40).IsConcurrencyToken();
+            entity.Property(order => order.ProcessStateEnteredAtUtc);
             entity.Property(order => order.Notes).HasMaxLength(500);
             entity.Property(order => order.BranchId).HasMaxLength(64);
             entity.Property(order => order.ServicesTotal).HasPrecision(18, 2);

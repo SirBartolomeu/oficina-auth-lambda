@@ -15,7 +15,7 @@ $compose = @(
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao iniciar bancos ou ElasticMQ.' }
 
 foreach ($database in @(
-    @{ Container = 'oficina-mvp-db'; User = 'oficina'; Name = 'oficina_saga_local' },
+    @{ Container = 'oficina-mvp-db'; User = 'oficina'; Name = 'oficina_saga_migrated_local' },
     @{ Container = 'oficina-mvp-execution-db-1'; User = 'execution'; Name = 'oficina_execution_saga_local' }
 )) {
     $exists = & docker exec $database.Container psql -U $database.User -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$($database.Name)'"

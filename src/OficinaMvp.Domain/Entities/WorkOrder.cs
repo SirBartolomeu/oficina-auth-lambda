@@ -38,6 +38,7 @@ public sealed class WorkOrder
         UpdatedAtUtc = createdAtUtc;
         Status = WorkOrderStatus.Received;
         ProcessState = WorkOrderProcessState.AwaitingBudget;
+        ProcessStateEnteredAtUtc = createdAtUtc;
         Services = serviceItems;
         Parts = partItems;
         StatusHistory = new List<WorkOrderStatusHistory>
@@ -53,6 +54,7 @@ public sealed class WorkOrder
     public Guid VehicleId { get; private set; }
     public WorkOrderStatus Status { get; private set; }
     public WorkOrderProcessState ProcessState { get; private set; }
+    public DateTime? ProcessStateEnteredAtUtc { get; private set; }
     public Guid? BudgetId { get; private set; }
     public int? BudgetVersion { get; private set; }
     public Guid? ReservationId { get; private set; }
@@ -93,7 +95,7 @@ public sealed class WorkOrder
         }
 
         BudgetSentAtUtc = changedAtUtc;
-        ProcessState = WorkOrderProcessState.AwaitingApproval;
+        ChangeProcessState(WorkOrderProcessState.AwaitingApproval, changedAtUtc);
         ChangeStatus(WorkOrderStatus.AwaitingApproval, changedAtUtc, "Orçamento enviado para aprovação do cliente.");
     }
 
@@ -120,7 +122,7 @@ public sealed class WorkOrder
         EnsureCurrentStatus(WorkOrderStatus.AwaitingApproval);
         ApprovedAtUtc = changedAtUtc;
         ExecutionStartedAtUtc = changedAtUtc;
-        ProcessState = WorkOrderProcessState.InExecution;
+        ChangeProcessState(WorkOrderProcessState.InExecution, changedAtUtc);
         ChangeStatus(WorkOrderStatus.InExecution, changedAtUtc, "Cliente aprovou o orçamento. Serviço em execução.");
     }
 
@@ -132,7 +134,7 @@ public sealed class WorkOrder
             throw new DomainException("Identificador de reserva inválido.");
         ApprovedAtUtc = changedAtUtc;
         ReservationId = reservationId;
-        ProcessState = WorkOrderProcessState.AwaitingStockReservation;
+        ChangeProcessState(WorkOrderProcessState.AwaitingStockReservation, changedAtUtc);
         RecordProcessNote(changedAtUtc, "Orçamento aprovado. Aguardando reserva de peças.");
     }
 
@@ -142,7 +144,7 @@ public sealed class WorkOrder
         if (paymentAttemptId == Guid.Empty)
             throw new DomainException("Identificador da tentativa de pagamento inválido.");
         PaymentAttemptId = paymentAttemptId;
-        ProcessState = WorkOrderProcessState.AwaitingPayment;
+        ChangeProcessState(WorkOrderProcessState.AwaitingPayment, changedAtUtc);
         RecordProcessNote(changedAtUtc, "Peças reservadas. Aguardando pagamento.");
     }
 
@@ -155,21 +157,21 @@ public sealed class WorkOrder
     public void ConfirmPayment(DateTime changedAtUtc)
     {
         EnsureProcessState(WorkOrderProcessState.AwaitingPayment);
-        ProcessState = WorkOrderProcessState.ReadyForExecution;
+        ChangeProcessState(WorkOrderProcessState.ReadyForExecution, changedAtUtc);
         RecordProcessNote(changedAtUtc, "Pagamento confirmado. Aguardando execução.");
     }
 
     public void BeginStockRelease(DateTime changedAtUtc, string reason)
     {
         EnsureProcessState(WorkOrderProcessState.AwaitingPayment);
-        ProcessState = WorkOrderProcessState.ReleasingStock;
+        ChangeProcessState(WorkOrderProcessState.ReleasingStock, changedAtUtc);
         RecordProcessNote(changedAtUtc, $"Pagamento não concluído. Liberando peças: {NormalizeOptional(reason)}");
     }
 
     public void ConfirmStockRelease(DateTime changedAtUtc)
     {
         EnsureProcessState(WorkOrderProcessState.ReleasingStock);
-        ProcessState = WorkOrderProcessState.Canceled;
+        ChangeProcessState(WorkOrderProcessState.Canceled, changedAtUtc);
         RecordProcessNote(changedAtUtc, "Peças liberadas. Tentativa cancelada.");
     }
 
@@ -177,7 +179,7 @@ public sealed class WorkOrder
     {
         EnsureProcessState(WorkOrderProcessState.ReadyForExecution);
         ExecutionStartedAtUtc = changedAtUtc;
-        ProcessState = WorkOrderProcessState.InExecution;
+        ChangeProcessState(WorkOrderProcessState.InExecution, changedAtUtc);
         ChangeStatus(WorkOrderStatus.InExecution, changedAtUtc, "Pagamento confirmado. Serviço em execução.");
     }
 
@@ -186,7 +188,7 @@ public sealed class WorkOrder
         EnsureProcessState(WorkOrderProcessState.InExecution);
         if (string.IsNullOrWhiteSpace(reason))
             throw new DomainException("Motivo da recusa do reparo obrigatório.");
-        ProcessState = WorkOrderProcessState.ManualReview;
+        ChangeProcessState(WorkOrderProcessState.ManualReview, changedAtUtc);
         RecordProcessNote(changedAtUtc,
             $"Reparo recusado. Revisar estorno e compensação: {NormalizeOptional(reason)}");
     }
@@ -199,14 +201,14 @@ public sealed class WorkOrder
             string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 180)
             throw new DomainException("Solicitação de estorno inválida.");
         RefundRequestId = refundRequestId;
-        ProcessState = WorkOrderProcessState.RefundRequested;
+        ChangeProcessState(WorkOrderProcessState.RefundRequested, changedAtUtc);
         RecordProcessNote(changedAtUtc, $"Estorno solicitado após revisão: {reason.Trim()}");
     }
 
     public void ConfirmRefund(DateTime changedAtUtc)
     {
         EnsureProcessState(WorkOrderProcessState.RefundRequested);
-        ProcessState = WorkOrderProcessState.Canceled;
+        ChangeProcessState(WorkOrderProcessState.Canceled, changedAtUtc);
         ChangeStatus(WorkOrderStatus.Canceled, changedAtUtc,
             "Estorno confirmado pelo provedor. OS cancelada.");
     }
@@ -220,7 +222,7 @@ public sealed class WorkOrder
             throw new DomainException("A OS só pode ser cancelada antes do início da execução.");
         }
 
-        ProcessState = WorkOrderProcessState.Canceled;
+        ChangeProcessState(WorkOrderProcessState.Canceled, changedAtUtc);
         RecordProcessNote(changedAtUtc, $"OS cancelada: {NormalizeOptional(reason)}");
     }
 
@@ -242,7 +244,7 @@ public sealed class WorkOrder
         EnsureCurrentStatus(WorkOrderStatus.InExecution);
         EnsureProcessState(WorkOrderProcessState.InExecution);
         FinalizedAtUtc = changedAtUtc;
-        ProcessState = WorkOrderProcessState.Completed;
+        ChangeProcessState(WorkOrderProcessState.Completed, changedAtUtc);
         ChangeStatus(WorkOrderStatus.Finalized, changedAtUtc, "Serviço finalizado.");
     }
 
@@ -274,6 +276,12 @@ public sealed class WorkOrder
         {
             throw new DomainException($"Transição de processo inválida. Estado atual: {ProcessState}.");
         }
+    }
+
+    private void ChangeProcessState(WorkOrderProcessState newState, DateTime changedAtUtc)
+    {
+        ProcessState = newState;
+        ProcessStateEnteredAtUtc = changedAtUtc;
     }
 
     private void RecordProcessNote(DateTime changedAtUtc, string note)
