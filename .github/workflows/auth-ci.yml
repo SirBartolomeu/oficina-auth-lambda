@@ -6,7 +6,6 @@ on:
     paths: ['services/Oficina.Auth/**', 'services/Oficina.Auth.Tests/**', '.github/workflows/auth-ci.yml', 'global.json']
   pull_request:
     branches: [main]
-    paths: ['services/Oficina.Auth/**', 'services/Oficina.Auth.Tests/**', '.github/workflows/auth-ci.yml', 'global.json']
   workflow_dispatch:
 
 permissions:
