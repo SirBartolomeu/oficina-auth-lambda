@@ -23,6 +23,6 @@ O script gera um ZIP local ignorado pelo Git. As variáveis de runtime são `AUT
 
 ## Deploy
 
-`oficina-data-infra` cria o segredo da OS, `oficina-k8s-infra` cria VPC/endpoint privado, Lambda e HTTP API. O workflow `auth-ci` testa, empacota e, quando OIDC/variáveis estiverem configurados, atualiza somente o código da Function. Uma nova aplicação Terraform requer o ZIP inicial sincronizado com o commit para evitar regressão. Consulte a [arquitetura completa](docs/architecture-phase4.md). Nenhuma invocação AWS foi comprovada até o deploy autorizado.
+`oficina-data-infra` cria o segredo da OS, `oficina-k8s-infra` cria VPC/endpoint privado, Lambda e HTTP API. O workflow `auth-ci` testa, empacota e, quando OIDC/variáveis estiverem configurados, atualiza somente o código da Function. Uma nova aplicação Terraform requer o ZIP inicial sincronizado com o commit para evitar regressão. Consulte a [arquitetura completa](docs/architecture-phase4.md). O workflow [auth-ci #6](https://github.com/SirBartolomeu/oficina-auth-lambda/actions/runs/44178681060) concluiu a publicação da Lambda e reportou 13 testes aprovados. A evidência disponível não comprova emissão de JWT ponta a ponta em ambiente AWS; a função não é containerizada e não requer manifest Kubernetes.
 
 Extraído do projeto oficina-mvp, preservando o histórico Git. Sem remote configurado.
